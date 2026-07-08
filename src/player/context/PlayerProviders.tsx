@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useMemo, useCallback, useEffect } from 'react';
 import { usePlayerAuth, usePlayerAuthLoginHandler } from '../hooks/usePlayerAuth';
 import { usePlayerIntel } from '../hooks/usePlayerIntel';
 import { useProfileUpdates } from '../hooks/useProfileUpdates';
@@ -48,6 +48,12 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
   });
 
   playbackRef.current = { resetPlayback: playback.resetPlayback };
+
+  useEffect(() => {
+    const pending = playerData?.character?.pendingVideoPlay;
+    if (!pending?.intelId || !pending?.requestId) return;
+    playback.handleRemoteVideoPlay(pending.intelId, pending.requestId);
+  }, [playerData?.character?.pendingVideoPlay?.requestId, playback.handleRemoteVideoPlay]);
 
   const {
     walkmanStatus,

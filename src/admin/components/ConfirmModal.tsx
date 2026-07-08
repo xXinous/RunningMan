@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import Screw from '../../components/player/Screw';
+import OverlayPortal from './OverlayPortal';
 
 type ModalVariant = 'confirm' | 'alert';
 interface ModalState {
@@ -26,6 +27,7 @@ export function ConfirmModal({ state, onConfirm, onCancel }: ConfirmModalProps) 
   }, [state.open]);
 
   return (
+    <OverlayPortal open={state.open} onClose={onCancel}>
     <AnimatePresence>
       {state.open && (
         <motion.div
@@ -86,6 +88,7 @@ export function ConfirmModal({ state, onConfirm, onCancel }: ConfirmModalProps) 
         </motion.div>
       )}
     </AnimatePresence>
+    </OverlayPortal>
   );
 }
 

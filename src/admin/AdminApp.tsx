@@ -6,6 +6,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import Dashboard from './components/Dashboard';
 import { ToastProvider } from './components/ToastProvider';
 import RetroLoading from '../components/player/RetroLoading';
+import { resolveAdminAccess } from '../lib/adminAccess';
 
 // Lazy-load Material Symbols font (admin-only, ~250KB)
 const MATERIAL_SYMBOLS_URL = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap';
@@ -14,6 +15,7 @@ const ADMIN_CODENAME = 'gm.mpg';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasAdminAccess, setHasAdminAccess] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Load Material Symbols font for admin panel
@@ -26,7 +28,7 @@ export default function App() {
 
 
     
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
         const userRef = doc(db, 'users', currentUser.uid);
@@ -50,17 +52,21 @@ export default function App() {
           .catch((err) => {
             console.warn('[AdminApp] Error fetching admin user doc:', err);
           });
+
+        setHasAdminAccess(await resolveAdminAccess(currentUser));
+      } else {
+        setHasAdminAccess(false);
       }
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  if (loading) {
+  if (loading || hasAdminAccess === null) {
     return <RetroLoading fullScreen message="Inicializando_Protocolos..." subMessage="Acessando Terminal Administrativo RM-84" />;
   }
 
-  if (!user || user.uid !== '5TZK6YHmOOTe5padFPqCbXuavPu1') {
+  if (!user || !hasAdminAccess) {
     window.location.href = '/';
     return null;
   }

@@ -62,14 +62,42 @@ export async function loadMasterAccount(uid: string): Promise<MasterAccount> {
   } as MasterAccount;
 }
 
-export async function createUserDoc(uid: string, email: string, masterId: string): Promise<void> {
-  await setDoc(doc(db, 'users', uid), {
-    uid,
-    email,
-    masterName: masterId,
-    role: 'player',
-    createdAt: serverTimestamp(),
-    lastLogin: serverTimestamp(),
+const DEFAULT_WAIT_FOR_USER_DOC_MS = 8000;
+
+/**
+ * Aguarda o perfil users/{uid} ser criado pelo trigger server-side (onAuthUserCreated).
+ */
+export function waitForUserDoc(uid: string, timeoutMs = DEFAULT_WAIT_FOR_USER_DOC_MS): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ref = doc(db, 'users', uid);
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      unsub();
+      reject(new Error('Timeout aguardando criação do perfil.'));
+    }, timeoutMs);
+
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (settled) return;
+        if (snap.exists()) {
+          settled = true;
+          clearTimeout(timer);
+          unsub();
+          resolve();
+        }
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsub();
+        reject(err);
+      },
+    );
   });
 }
 
@@ -84,7 +112,9 @@ export async function updateLastLogin(uid: string): Promise<void> {
 export async function fetchCharacters(uid: string): Promise<CharacterData[]> {
   if (!uid) return [];
   const snap = await getDocs(query(collection(db, 'users', uid, 'characters'), orderBy('createdAt', 'desc')));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as CharacterData));
+  return snap.docs
+    .map(d => ({ ...d.data(), id: d.id } as CharacterData))
+    .filter(c => !c.archived);
 }
 
 export async function createCharacter(uid: string, codinome: string): Promise<CharacterData> {
@@ -94,6 +124,7 @@ export async function createCharacter(uid: string, codinome: string): Promise<Ch
     codinome,
     agentStatus: 'vivo',
     dangerLevel: 1,
+    archived: false,
     createdAt: serverTimestamp() as any,
   };
   await setDoc(doc(db, 'users', uid, 'characters', charId), charData);
@@ -124,7 +155,7 @@ export async function loadPlayerData(uid: string, characterId: string): Promise<
     createdAt: accountData?.createdAt || null,
     ...accountData
   };
-  const character = { id: characterId, ...charSnap.data() } as CharacterData;
+  const character = { ...charSnap.data(), id: characterId } as CharacterData;
   const stats = statsSnap.exists() ? { ...DEFAULT_STATS, ...(statsSnap.data() as Partial<PlayerStats>) } : DEFAULT_STATS;
 
   return {
@@ -257,7 +288,7 @@ export async function firestoreMarkThreadReadGlobal(threadId: string): Promise<v
   });
 }
 
-// --- Legacy & Shared Utils ---
+// --- Play Events & Media Utils ---
 
 export async function recordPlayEvent(uid: string, characterId: string, tapeId: string): Promise<string> {
   const docRef = await addDoc(collection(db, 'playEvents'), {
@@ -316,13 +347,10 @@ export async function updateRemoteIntel(item: IntelItem): Promise<void> {
   let rawType = 'other';
   if (item.type === 'AUDIO') {
     rawType = 'audio';
+  } else if (item.type === 'VIDEO') {
+    rawType = 'video';
   } else if (item.type === 'VISUAL') {
-    const ext = item.mediaUrl?.split('?')[0].split('.').pop()?.toLowerCase();
-    if (ext && ['mp4', 'webm', 'mov'].includes(ext)) {
-      rawType = 'video';
-    } else {
-      rawType = 'image';
-    }
+    rawType = 'image';
   } else if (item.type === 'TEXT') {
     rawType = 'text';
   } else if (item.type === 'META') {
@@ -347,6 +375,9 @@ export async function updateRemoteIntel(item: IntelItem): Promise<void> {
     if (item.metadata.hint !== undefined) metadata.hint = item.metadata.hint;
     if (item.metadata.unlockCondition !== undefined) metadata.unlockCondition = item.metadata.unlockCondition;
     if (item.metadata.achievementRuleId !== undefined) metadata.achievementRuleId = item.metadata.achievementRuleId;
+    if (item.metadata.videoFormat !== undefined) metadata.videoFormat = item.metadata.videoFormat;
+    if (item.metadata.videoSource !== undefined) metadata.videoSource = item.metadata.videoSource;
+    if (item.metadata.youtubeId !== undefined) metadata.youtubeId = item.metadata.youtubeId;
   }
 
   const updateData: any = {
@@ -393,6 +424,53 @@ export async function saveQrRedirect(sourceId: string, targetId: string, reason?
 
 export async function deleteQrRedirect(sourceId: string): Promise<void> {
   await deleteDoc(doc(db, 'qrRedirects', sourceId));
+}
+
+// --- Remote Video Broadcast (Admin → Player) ---
+
+export interface VideoBroadcastTarget {
+  uid: string;
+  characterId: string;
+}
+
+/**
+ * Envia comando de reprodução de vídeo para personagens selecionados.
+ * Opcionalmente desbloqueia o intel antes de transmitir.
+ */
+export async function broadcastVideoToCharacters(
+  targets: VideoBroadcastTarget[],
+  intelId: string,
+  options?: { grantIntel?: boolean; campaignId?: string }
+): Promise<string> {
+  if (targets.length === 0) return '';
+  const requestId = crypto.randomUUID();
+  const batch = writeBatch(db);
+
+  targets.forEach(({ uid, characterId }) => {
+    if (options?.grantIntel) {
+      const intelRef = doc(db, 'users', uid, 'characters', characterId, 'intel', intelId);
+      batch.set(intelRef, {
+        unlockedAt: serverTimestamp(),
+        campaignId: options.campaignId || null,
+      }, { merge: true });
+    }
+    batch.set(doc(db, 'users', uid, 'characters', characterId), {
+      pendingVideoPlay: {
+        intelId,
+        requestId,
+        triggeredAt: serverTimestamp(),
+      },
+    }, { merge: true });
+  });
+
+  await batch.commit();
+  return requestId;
+}
+
+export async function clearPendingVideoPlay(uid: string, characterId: string): Promise<void> {
+  await setDoc(doc(db, 'users', uid, 'characters', characterId), {
+    pendingVideoPlay: null,
+  }, { merge: true });
 }
 
 // Re-export types used by admin panels

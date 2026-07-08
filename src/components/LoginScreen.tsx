@@ -222,11 +222,6 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           </div>
         </div>
       </div>
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 opacity-20">
-        <div className="h-px w-12 bg-industrial-silver" />
-        <div className="text-[10px] font-display font-bold uppercase tracking-[0.4em] text-industrial-silver">Indústrias Smile © 2026</div>
-        <div className="h-px w-12 bg-industrial-silver" />
-      </div>
     </div>
   );
 }

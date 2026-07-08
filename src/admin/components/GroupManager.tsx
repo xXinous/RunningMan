@@ -7,14 +7,15 @@ import { activityLogger } from '../../services/ActivityLogger';
 import { db } from '../../lib/firebase';
 import { collection, onSnapshot, Timestamp } from 'firebase/firestore';
 import { useModal } from './ConfirmModal';
-import BulkInventoryModal from './BulkInventoryModal';
+import IntelDistributionDrawer from './IntelDistributionDrawer';
 import NpcSmsDistributionModal from './NpcSmsDistributionModal';
 
 interface GroupManagerProps {
   isAdmin: boolean;
+  onNavigateToMission?: (campaignId: string) => void;
 }
 
-export default function GroupManager({ isAdmin }: GroupManagerProps) {
+export default function GroupManager({ isAdmin, onNavigateToMission }: GroupManagerProps) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [users, setUsers] = useState<MasterAccount[]>([]);
   const [allCharacters, setAllCharacters] = useState<{uid: string, char: CharacterData}[]>([]);
@@ -26,10 +27,8 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
   // Form State
   const [groupName, setGroupName] = useState("");
   const [selectedCharacters, setSelectedCharacters] = useState<{uid: string, characterId: string}[]>([]);
-  const [selectedCampaign, setSelectedCampaign] = useState("");
   const [sessionDate, setSessionDate] = useState("");
   const [sessions, setSessions] = useState<string[]>([]);
-  const [unlockedCampaigns, setUnlockedCampaigns] = useState<string[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [agentSearchQuery, setAgentSearchQuery] = useState("");
 
@@ -117,7 +116,7 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
         joinedAt: Timestamp.now()
       }));
 
-      await groupService.createGroup(groupName, slots, sessions, selectedCampaign || undefined, unlockedCampaigns);
+      await groupService.createGroup(groupName, slots, sessions);
       activityLogger.logAdmin('gm.mpg', 'group_created', `Grupo criado: ${groupName}`, { players: selectedCharacters.length });
       resetForm();
     } catch (error) {
@@ -139,8 +138,6 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
       await groupService.updateGroup(editingGroup.id, {
         name: groupName,
         characterSlots: newSlots,
-        campaignId: selectedCampaign || undefined,
-        unlockedCampaigns: unlockedCampaigns,
         sessions: sessions
       });
       activityLogger.logAdmin('gm.mpg', 'group_updated', `Grupo atualizado: ${groupName}`);
@@ -204,19 +201,15 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
     setEditingGroup(null);
     setGroupName("");
     setSelectedCharacters([]);
-    setSelectedCampaign("");
     setSessions([]);
     setSessionDate("");
-    setUnlockedCampaigns([]);
   };
 
   const startEdit = (group: Group) => {
     setEditingGroup(group);
     setGroupName(group.name);
     setSelectedCharacters(group.characterSlots ? group.characterSlots.map(s => ({ uid: s.uid, characterId: s.characterId })) : []);
-    setSelectedCampaign(group.campaignId || "");
     setSessions(group.sessions || []);
-    setUnlockedCampaigns(group.unlockedCampaigns || []);
     setIsCreating(true);
   };
 
@@ -228,12 +221,6 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
 
   const removeSession = (date: string) => {
     setSessions(sessions.filter(s => s !== date));
-  };
-
-  const toggleCampaignUnlock = (id: string) => {
-    setUnlockedCampaigns(prev => 
-      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    );
   };
 
   const toggleCharacter = (uid: string, characterId: string) => {
@@ -296,37 +283,10 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
                   />
                 </div>
 
-                <div>
-                  <label className="block font-black text-[10px] text-zinc-500 mb-3 uppercase tracking-widest">Missão_Ativa (Em_Campo)</label>
-                  <select 
-                    value={selectedCampaign}
-                    onChange={(e) => setSelectedCampaign(e.target.value)}
-                    className="w-full bg-black/60 border-2 border-[#1a1a1a] text-primary text-[10px] font-black px-4 py-3 outline-none focus:border-primary uppercase rounded-sm transition-all"
-                  >
-                    <option value="">-- SEM_VÍNCULO_DIRETO --</option>
-                    {campaigns.map(c => (
-                      <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-black text-[10px] text-zinc-500 mb-3 uppercase tracking-widest">Missões_Autorizadas (Acesso_Liberado)</label>
-                  <div className="bg-black/40 border border-[#1a1a1a] p-3 rounded-sm space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                    {campaigns.map(c => (
-                      <button 
-                        key={c.id}
-                        type="button"
-                        onClick={() => toggleCampaignUnlock(c.id)}
-                        className={`w-full flex items-center justify-between p-2 rounded-sm text-[9px] font-black uppercase tracking-widest transition-all ${
-                          unlockedCampaigns.includes(c.id) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-transparent text-zinc-600 border border-transparent hover:bg-white/5'
-                        }`}
-                      >
-                        {c.name}
-                        {unlockedCampaigns.includes(c.id) && <span className="material-symbols-outlined text-xs">check_circle</span>}
-                      </button>
-                    ))}
-                  </div>
+                <div className="bg-primary/5 border border-primary/20 rounded-sm p-4">
+                  <p className="text-[9px] font-black text-primary/70 uppercase tracking-widest leading-relaxed">
+                    Missões ativas e autorizações são gerenciadas na aba Missões → Gerenciar.
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t border-white/5">
@@ -523,6 +483,15 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
                     </div>
                   </div>
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                    {group.campaignId && onNavigateToMission && (
+                      <button
+                        onClick={() => onNavigateToMission(group.campaignId!)}
+                        className="w-8 h-8 flex items-center justify-center bg-black/60 border border-white/10 rounded-sm text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all active:scale-90"
+                        title="Gerenciar Missões"
+                      >
+                        <span className="material-symbols-outlined text-sm">rocket_launch</span>
+                      </button>
+                    )}
                     <button onClick={() => setShowSmsModal(group.id)} className="w-8 h-8 flex items-center justify-center bg-black/60 border border-white/10 rounded-sm text-primary hover:bg-primary hover:text-black transition-all active:scale-90" title="Distribuir Torpedos SMS de NPCs">
                       <span className="material-symbols-outlined text-sm">sms</span>
                     </button>
@@ -621,14 +590,14 @@ export default function GroupManager({ isAdmin }: GroupManagerProps) {
 
       {/* Grant Intel Modal (Batch) */}
       {showGrantModal && (
-        <BulkInventoryModal 
+        <IntelDistributionDrawer
            onClose={() => setShowGrantModal(null)}
            onSuccess={() => {}}
-           onExecuteBulk={async (selectedIds) => {
+           onExecuteGrant={async (selectedIds) => {
              const aliveOnly = await showConfirm('Condição de Distribuição', 'Distribuir apenas para agentes VIVOS no esquadrão? (Clique em confirmar para Apenas Vivos)', 'Apenas Vivos');
              await handleGrantIntelToGroup(showGrantModal, selectedIds, aliveOnly);
-           }} 
-           title="Vetor de Transmissão: Esquadrão"
+           }}
+           title="Distribuir Intel — Esquadrão"
         />
       )}
 

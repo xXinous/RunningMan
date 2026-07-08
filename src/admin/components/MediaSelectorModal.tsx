@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import MediaLibraryPanel from './MediaLibraryPanel';
 import { MediaAsset, MediaType } from '../../types/media';
 import Screw from '../../components/player/Screw';
+import OverlayPortal from './OverlayPortal';
 
 interface MediaSelectorModalProps {
   isOpen: boolean;
@@ -19,9 +20,10 @@ export default function MediaSelectorModal({
   title = "Selecionar Mídia",
   allowedTypes 
 }: MediaSelectorModalProps) {
-  if (!isOpen) return null;
-
   return (
+    <OverlayPortal open={isOpen} onClose={onClose}>
+      <AnimatePresence>
+        {isOpen && (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0 }}
@@ -79,5 +81,8 @@ export default function MediaSelectorModal({
         </div>
       </motion.div>
     </div>
+        )}
+      </AnimatePresence>
+    </OverlayPortal>
   );
 }

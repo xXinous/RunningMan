@@ -1,4 +1,4 @@
-import type { IntelItem, AccessLevel, IntelType, VisualCategory } from '../types/intel';
+import type { IntelItem, AccessLevel, IntelType, VisualCategory, VideoFormat } from '../types/intel';
 import type { GalleryImage } from '../types/player';
 
 /**
@@ -128,6 +128,11 @@ class IntelRegistry {
     return this.items.has(id);
   }
 
+  /** Remove um item do registro em memória (não afeta Firestore). */
+  public unregister(id: string): boolean {
+    return this.items.delete(id);
+  }
+
   // --- Incorporação de dados remotos ---
 
   /**
@@ -187,6 +192,52 @@ class IntelRegistry {
       metadata: {
         visualCategory: img.category,
         imageUrl: img.imageUrl,
+      },
+    };
+    this.register(intel);
+    return intel;
+  }
+
+  /**
+   * Converte e registra um vídeo remoto do Firebase como IntelItem VIDEO.
+   */
+  public registerRemoteVideo(data: {
+    id: string;
+    title?: string;
+    npc?: string;
+    chapter?: string;
+    description?: string;
+    url?: string;
+    duration?: number;
+    isSecret?: boolean;
+    level?: number;
+    campaignId?: string;
+    videoFormat?: VideoFormat;
+    videoSource?: 'upload' | 'youtube';
+    youtubeId?: string;
+  }): IntelItem {
+    const youtubeId =
+      data.youtubeId ||
+      (data.url && /youtube|youtu\.be/.test(data.url)
+        ? data.url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/)?.[1]
+        : undefined);
+
+    const intel: IntelItem = {
+      id: data.id,
+      campaignId: data.campaignId,
+      type: 'VIDEO',
+      level: (data.level || (data.isSecret ? 3 : 1)) as AccessLevel,
+      title: data.title || '',
+      description: data.description || '',
+      mediaUrl: data.url,
+      metadata: {
+        npc: data.npc || '',
+        chapter: data.chapter || '',
+        duration: data.duration || 0,
+        isSecret: data.isSecret,
+        videoFormat: data.videoFormat || 'VHS',
+        videoSource: data.videoSource || (youtubeId ? 'youtube' : 'upload'),
+        youtubeId,
       },
     };
     this.register(intel);

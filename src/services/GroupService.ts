@@ -15,9 +15,9 @@ import {
   orderBy,
   Timestamp,
   arrayUnion,
-  arrayRemove
 } from 'firebase/firestore';
 import { Group, GroupCharacterSlot } from '../types/player';
+import { intelService } from './IntelService';
 
 export class GroupService {
   private static instance: GroupService;
@@ -44,16 +44,12 @@ export class GroupService {
   public async createGroup(name: string, characterSlots: GroupCharacterSlot[], sessions: string[], campaignId?: string, unlockedCampaigns?: string[]): Promise<string> {
     const groupRef = doc(collection(db, 'groups'));
     const now = Timestamp.now();
-    
-    // Keep playerUids for backwards compat
-    const playerUids = [...new Set(characterSlots.map(s => s.uid))];
 
     const newGroup: Group = {
       id: groupRef.id,
       name,
-      playerUids,
       characterSlots,
-      campaignId: campaignId || undefined,
+      ...(campaignId ? { campaignId } : {}),
       unlockedCampaigns: unlockedCampaigns || [],
       sessions,
       createdAt: now,
@@ -66,12 +62,7 @@ export class GroupService {
 
   public async updateGroup(groupId: string, data: Partial<Group>): Promise<void> {
     const groupRef = doc(db, 'groups', groupId);
-    
-    // Keep playerUids in sync with characterSlots
-    if (data.characterSlots) {
-      data.playerUids = [...new Set(data.characterSlots.map(s => s.uid))];
-    }
-    
+
     await updateDoc(groupRef, {
       ...data,
       updatedAt: serverTimestamp()
@@ -112,7 +103,6 @@ export class GroupService {
 
     await updateDoc(groupRef, {
       characterSlots: [...slots, newSlot],
-      playerUids: arrayUnion(uid),
       updatedAt: serverTimestamp()
     });
   }
@@ -127,39 +117,66 @@ export class GroupService {
 
     const group = snap.data() as Group;
     const newSlots = (group.characterSlots || []).filter(s => s.characterId !== characterId);
-    const newUids = [...new Set(newSlots.map(s => s.uid))];
 
     await updateDoc(groupRef, {
       characterSlots: newSlots,
-      playerUids: newUids,
       updatedAt: serverTimestamp()
+    });
+  }
+
+  /**
+   * Verifica se um slot pertence ao personagem ativo (com fallback por uid da conta).
+   */
+  private isSlotForCharacter(
+    slot: GroupCharacterSlot | Record<string, unknown>,
+    characterId: string,
+    uid?: string
+  ): boolean {
+    const slotCharacterId = String(
+      (slot as GroupCharacterSlot).characterId ??
+      (slot as Record<string, unknown>).character_id ??
+      ''
+    );
+    const slotUid = String((slot as GroupCharacterSlot).uid ?? '');
+
+    if (slotCharacterId && slotCharacterId === characterId) return true;
+    if (uid && slotUid === uid && (!slotCharacterId || slotCharacterId === characterId)) return true;
+    return false;
+  }
+
+  private filterGroupsForCharacter(groups: Group[], characterId: string, uid?: string): Group[] {
+    return groups.filter((g) => {
+      const slots = g.characterSlots;
+      if (!Array.isArray(slots)) return false;
+      return slots.some((slot) => this.isSlotForCharacter(slot, characterId, uid));
     });
   }
 
   /**
    * Get all groups that a specific character belongs to.
    */
-  public async getGroupsForCharacter(characterId: string): Promise<Group[]> {
+  public async getGroupsForCharacter(characterId: string, uid?: string): Promise<Group[]> {
     const q = query(collection(db, 'groups'));
     const snap = await getDocs(q);
-    return snap.docs
-      .map(doc => ({ id: doc.id, ...doc.data() } as Group))
-      .filter(g => g.characterSlots?.some(slot => slot.characterId === characterId));
+    const groups = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
+    return this.filterGroupsForCharacter(groups, characterId, uid);
   }
 
   /**
    * Subscribe to all groups that a specific character belongs to.
    */
-  public subscribeToGroupsForCharacter(characterId: string, callback: (groups: Group[]) => void): () => void {
+  public subscribeToGroupsForCharacter(
+    characterId: string,
+    callback: (groups: Group[]) => void,
+    uid?: string
+  ): () => void {
     const q = query(collection(db, 'groups'));
     return onSnapshot(q, (snapshot) => {
-      const groups = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Group))
-        .filter(g => g.characterSlots?.some(slot => slot.characterId === characterId));
-      callback(groups);
+      const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Group));
+      callback(this.filterGroupsForCharacter(groups, characterId, uid));
     }, (error) => {
       console.warn('[GroupService] subscribeToGroupsForCharacter error:', error);
-      callback([]); // Prevent indefinite loading
+      callback([]);
     });
   }
 
@@ -173,26 +190,57 @@ export class GroupService {
 
     const group = groupSnap.data() as Group;
     const slots = group.characterSlots || [];
-    let grantCount = 0;
+    const targets: { uid: string; characterId: string }[] = [];
+    const agentStatusByKey: Record<string, string> = {};
 
     for (const slot of slots) {
-      // Check character status if aliveOnly
-      if (aliveOnly) {
-        const charSnap = await getDoc(doc(db, 'users', slot.uid, 'characters', slot.characterId));
-        if (!charSnap.exists()) continue;
-        const charData = charSnap.data();
-        if (charData.agentStatus !== 'vivo') continue;
-      }
-
-      await setDoc(doc(db, 'users', slot.uid, 'characters', slot.characterId, 'intel', intelId), {
-        intelId,
-        unlockedAt: serverTimestamp(),
-        campaignId: group.campaignId || null
-      }, { merge: true });
-      grantCount++;
+      const charSnap = await getDoc(doc(db, 'users', slot.uid, 'characters', slot.characterId));
+      if (!charSnap.exists()) continue;
+      const charData = charSnap.data();
+      const key = `${slot.uid}_${slot.characterId}`;
+      agentStatusByKey[key] = charData.agentStatus || '';
+      targets.push({ uid: slot.uid, characterId: slot.characterId });
     }
 
-    return grantCount;
+    return intelService.grantIntel(targets, [intelId], {
+      campaignId: group.campaignId,
+      aliveOnly,
+      agentStatusByKey,
+    });
+  }
+
+  /**
+   * Subscribe to messages across multiple groups (merged inbox).
+   * Each message is tagged with `_groupId` for reply routing.
+   */
+  public subscribeToMessagesForGroups(
+    groupIds: string[],
+    callback: (messages: Array<Record<string, unknown> & { _groupId: string }>) => void
+  ): () => void {
+    if (groupIds.length === 0) {
+      callback([]);
+      return () => {};
+    }
+
+    const messagesByGroup = new Map<string, any[]>();
+    const unsubs: (() => void)[] = [];
+
+    const emit = () => {
+      const merged = groupIds.flatMap((groupId) =>
+        (messagesByGroup.get(groupId) || []).map((msg) => ({ ...msg, _groupId: groupId }))
+      );
+      callback(merged);
+    };
+
+    for (const groupId of groupIds) {
+      const unsub = this.subscribeToGroupMessages(groupId, (messages) => {
+        messagesByGroup.set(groupId, messages);
+        emit();
+      });
+      unsubs.push(unsub);
+    }
+
+    return () => unsubs.forEach((u) => u());
   }
 
   /**

@@ -11,8 +11,10 @@ import {
   VisualIntel,
   TextIntel,
   MetaIntel,
+  VideoIntel,
   IntelFactory,
 } from '../../services/IntelEngine';
+import { clearPendingVideoPlay } from '../../store/firestore';
 import type { PlayerData, PlayerStats, WalkmanStatus, DisplayMode, AppScreen } from '../../types/player';
 import type { Toast } from '../../components/ToastNotification';
 
@@ -41,6 +43,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
   const hasPlayedCurrentTape = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const nokiaBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const lastVideoRequestRef = useRef<string | null>(null);
 
   const isPlaying = walkmanStatus === 'PLAYING';
 
@@ -66,14 +69,15 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
     if (currentIntel instanceof AudioIntel && currentIntel.mediaUrl) {
       audioEngine.loadTrack(currentIntel.mediaUrl);
       analyticsTracker.pausePlayback();
-    } else if (!currentIntel) {
+    } else if (!currentIntel || currentIntel instanceof VideoIntel) {
       audioEngine.clearTrack();
-      analyticsTracker.stopAll();
+      if (!currentIntel) analyticsTracker.stopAll();
     }
     return () => audioEngine.clearTrack();
   }, [currentIntel?.id]);
 
   useEffect(() => {
+    if (currentIntel instanceof VideoIntel) return;
     if (walkmanStatus === 'PLAYING') {
       hasPlayedCurrentTape.current = true;
       audioEngine.play();
@@ -159,7 +163,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
           { intelId: intel.id }
         );
         firebaseAnalytics.logEvidenceViewed(intel.id, intel.type);
-      } else if (intel instanceof AudioIntel) {
+      } else if (intel instanceof AudioIntel || intel instanceof VideoIntel) {
         if (intel.id === currentIntel?.id) return;
         if (!hasPlayedCurrentTape.current && currentIntel) {
           analyticsTracker.incrementStat('ejectWithoutPlay');
@@ -170,7 +174,11 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
           setCurrentIntel(intel);
           setWalkmanStatus('LOADED');
         }, 400);
-        activityLogger.logAction('tape_select', `Selecionou: ${intel.title}`, { intelId: intel.id });
+        activityLogger.logAction(
+          intel instanceof VideoIntel ? 'video_select' : 'tape_select',
+          `Selecionou: ${intel.title}`,
+          { intelId: intel.id }
+        );
       }
     },
     [currentIntel, playerDataRef]
@@ -235,6 +243,58 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
     [setScreen]
   );
 
+  const handleRemoteVideoPlay = useCallback(
+    async (intelId: string, requestId: string) => {
+      if (lastVideoRequestRef.current === requestId) return;
+      lastVideoRequestRef.current = requestId;
+
+      const currentPD = playerDataRef.current;
+      if (!currentPD) return;
+
+      try {
+        const rawIntel = await intelService.resolve(intelId);
+        if (!rawIntel) return;
+
+        const intel = IntelFactory.getInstance().create(rawIntel);
+        if (!(intel instanceof VideoIntel)) return;
+
+        let updatedIds = currentPD.unlockedIntelIds;
+        if (!updatedIds.includes(intelId)) {
+          const unlockResult = await intelService.unlock(currentPD, intelId);
+          updatedIds = unlockResult.updatedIds;
+          setPlayerData({ ...currentPD, unlockedIntelIds: updatedIds });
+        }
+
+        setScreen('player');
+        hasPlayedCurrentTape.current = false;
+        setWalkmanStatus('LOADING');
+        timerRef.current = setTimeout(() => {
+          setCurrentIntel(intel);
+          setWalkmanStatus('PLAYING');
+          addToast({
+            type: 'tape',
+            title: 'Transmissão Recebida',
+            subtitle: intel.title,
+            icon: '[▶]',
+          });
+        }, 400);
+
+        await clearPendingVideoPlay(currentPD.uid, currentPD.activeCharacterId);
+        activityLogger.logSystem(
+          currentPD.uid,
+          currentPD.character.codinome,
+          currentPD.activeCharacterId,
+          'sync',
+          `Vídeo transmitido pelo mestre: ${intel.title}`,
+          { intelId, requestId }
+        );
+      } catch (err) {
+        console.error('[WalkmanPlayback] Remote video play failed:', err);
+      }
+    },
+    [playerDataRef, setPlayerData, setScreen, addToast]
+  );
+
   return {
     walkmanStatus,
     setWalkmanStatus,
@@ -264,6 +324,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
     handleToggleMute,
     registerNokiaBackHandler,
     handleNokiaBack,
+    handleRemoteVideoPlay,
     playerDataRef,
   };
 }

@@ -3,8 +3,8 @@ import type { Dispatch, SetStateAction } from 'react';
 import { activityLogger } from '../../services/ActivityLogger';
 import { analyticsTracker } from '../../services/AnalyticsTracker';
 import { playerSyncService } from '../../services/PlayerSyncService';
-import { onAuthStateChanged, logout } from '../../store/profile';
-import { loadMasterAccount, loadPlayerData } from '../../store/firestore';
+import { onAuthStateChanged, logout, ensureUserProfile } from '../../store/profile';
+import { loadPlayerData } from '../../store/firestore';
 import type {
   MasterAccount,
   CharacterData,
@@ -15,8 +15,7 @@ import type {
 } from '../../types/player';
 import type { PlayerIntelCollection } from '../../types/intel';
 import type { Toast } from '../../components/ToastNotification';
-
-const ADMIN_UID = '5TZK6YHmOOTe5padFPqCbXuavPu1';
+import { isAdminAccount, redirectToAdminPanel } from '../../lib/adminAccess';
 
 export interface UsePlayerAuthOptions {
   addToast: (toast: Omit<Toast, 'id'>) => void;
@@ -42,14 +41,15 @@ export function usePlayerAuth(options: UsePlayerAuthOptions) {
     const unsub = onAuthStateChanged(async (user) => {
       try {
         if (user) {
-          if (user.uid === ADMIN_UID) {
-            window.location.href = '/admin';
+          const account = await ensureUserProfile(user);
+          if (isAdminAccount(account)) {
+            redirectToAdminPanel();
             return;
           }
 
-          const account = await loadMasterAccount(user.uid);
           setMasterAccount(account);
           setScreen('characterSelection');
+          activityLogger.setUser(account.uid, account.email || account.masterName || 'user');
           activityLogger.logAuth('login', `Terminal acessado via ${account.email}`);
         } else {
           setMasterAccount(undefined);
@@ -140,6 +140,10 @@ export function usePlayerAuthLoginHandler(
 ) {
   return useCallback(
     (acc: MasterAccount) => {
+      if (isAdminAccount(acc)) {
+        redirectToAdminPanel();
+        return;
+      }
       setMasterAccount(acc);
       setScreen('characterSelection');
     },

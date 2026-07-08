@@ -8,7 +8,8 @@ import { MasterAccount, CharacterData } from "../../types/player";
 import { activityLogger } from "../../services/ActivityLogger";
 import RetroSpinner from '../../components/player/RetroSpinner';
 import AgentDossierView from "./AgentDossierView";
-import { motion } from 'motion/react';
+import OverlayPortal from './OverlayPortal';
+import { motion, AnimatePresence } from 'motion/react';
 
 type SortField = 'masterName' | 'role' | 'createdAt' | 'lastLogin';
 type SortDir = 'asc' | 'desc';
@@ -46,12 +47,7 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
   const [charactersByUid, setCharactersByUid] = useState<Record<string, CharacterData[]>>({});
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
-
-  // Pagination State
-  const [lastVisible, setLastVisible] = useState<any>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const PAGE_SIZE = 20;
+  const [loading, setLoading] = useState(true);
 
   const { modal } = useModal();
   const toast = useToast();
@@ -150,53 +146,27 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
   };
 
   useEffect(() => {
-    // Initial load
-    loadPage(true);
-  }, []);
-
-  const loadPage = async (reset = false) => {
-    if (loading || (!hasMore && !reset)) return;
-    setLoading(true);
-    try {
-      // Determine search field based on query content or default to masterName
-      let searchField = 'masterName';
-      if (searchQuery.includes('@')) searchField = 'email';
-      
-      const result = await userService.fetchUsersPage(
-        PAGE_SIZE, 
-        reset ? null : lastVisible,
-        searchQuery ? searchField : '',
-        searchQuery
-      );
-      
-      if (reset) {
-        setAccounts(result.users);
-      } else {
-        setAccounts(prev => [...prev, ...result.users]);
-      }
-      setLastVisible(result.lastVisible);
-      setHasMore(result.users.length === PAGE_SIZE);
-    } catch (err) {
-      toast.error('Erro ao carregar usuários.');
-    } finally {
+    if (!isAdmin) {
+      setAccounts([]);
       setLoading(false);
+      return;
     }
-  };
 
-  // Debounced Search
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      loadPage(true);
-    }, 500);
-    return () => clearTimeout(handler);
-  }, [searchQuery]);
+    setLoading(true);
+    const unsub = userService.subscribeToUsers((users) => {
+      setAccounts(users);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [isAdmin]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserCodinome.trim() || !newUserPassword.trim()) return;
     setCreateUserLoading(true);
     try {
-      await userService.createSyntheticUser(newUserCodinome, newUserPassword, newUserRole as any);
+      await userService.adminCreateUser(newUserCodinome, newUserPassword, newUserRole as 'player' | 'admin');
       toast.success(`Conta "${newUserCodinome}" registrada com sucesso.`);
       setNewUserCodinome(""); setNewUserPassword("");
       setShowCreateUser(false);
@@ -423,7 +393,26 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {filteredAccounts.map((acc) => {
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="p-16 text-center">
+                    <RetroSpinner />
+                    <p className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/30 mt-4">
+                      Carregando_Contas...
+                    </p>
+                  </td>
+                </tr>
+              ) : filteredAccounts.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-16 text-center text-industrial-silver/30">
+                    <span className="material-symbols-outlined text-3xl mb-2 opacity-50">group_off</span>
+                    <p className="text-[10px] font-display font-bold uppercase tracking-widest">
+                      {searchQuery ? 'Nenhuma conta encontrada para esta busca' : 'Nenhuma conta registrada'}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+              filteredAccounts.map((acc) => {
                 const status = getAccountStatus(acc);
                 const isExpanded = expandedAccounts.has(acc.uid);
                 const chars = allCharacters.filter(c => c.uid === acc.uid && (!c.char.archived || showArchived));
@@ -528,22 +517,11 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
                     )}
                   </React.Fragment>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
-        
-        {hasMore && (
-          <div className="flex justify-center mt-8">
-            <button 
-              onClick={() => loadPage()} 
-              disabled={loading}
-              className="bg-surface-container-high border border-white/5 text-industrial-silver/40 hover:text-primary hover:border-primary/20 px-8 py-3 rounded-sm font-display font-bold text-[10px] tracking-[0.2em] transition-all active:scale-95 flex items-center gap-3"
-            >
-              {loading ? <RetroSpinner /> : <><span className="material-symbols-outlined text-base">expand_more</span> CARREGAR_MAIS</>}
-            </button>
-          </div>
-        )}
       </div>
 
       {selectedAgent && (
@@ -557,9 +535,24 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
       )}
 
       {/* Quick Create Character Modal */}
-      {showCreateCharacter && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
-          <div className="bg-surface-container-low border border-primary/30 p-10 w-full max-w-sm rounded-sm shadow-2xl relative">
+      <OverlayPortal open={!!showCreateCharacter} onClose={() => setShowCreateCharacter(null)}>
+        <AnimatePresence>
+          {showCreateCharacter && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateCharacter(null); }}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="bg-surface-container-low border border-primary/30 p-10 w-full max-w-sm rounded-sm shadow-2xl relative"
+          >
             <div className="absolute -top-3 left-6 bg-primary px-2 py-0.5 text-[10px] font-display font-bold text-black tracking-widest uppercase">
               INSERÇÃO RÁPIDA
             </div>
@@ -590,13 +583,24 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+          )}
+        </AnimatePresence>
+      </OverlayPortal>
 
-      {/* Edit Account Modal */}
-      {editingAccount && (
-        <div className="fixed inset-0 z-[100] flex justify-end bg-black/70 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) { setEditingAccount(null); setResetPasswordValue(""); } }}>
+      {/* Edit Account Drawer */}
+      <OverlayPortal open={!!editingAccount} onClose={() => { setEditingAccount(null); setResetPasswordValue(""); }}>
+        <AnimatePresence>
+          {editingAccount && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex justify-end bg-black/70 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setEditingAccount(null); setResetPasswordValue(""); } }}
+        >
           <motion.div
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
@@ -677,13 +681,30 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
               </div>
             </div>
           </motion.div>
-        </div>
-      )}
+        </motion.div>
+          )}
+        </AnimatePresence>
+      </OverlayPortal>
 
       {/* Create User Modal */}
-      {showCreateUser && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
-          <div className="bg-surface-container-low border border-emerald-500/30 p-10 w-full max-w-md rounded-sm shadow-2xl relative overflow-hidden">
+      <OverlayPortal open={showCreateUser} onClose={() => setShowCreateUser(false)}>
+        <AnimatePresence>
+          {showCreateUser && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateUser(false); }}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="bg-surface-container-low border border-emerald-500/30 p-10 w-full max-w-md rounded-sm shadow-2xl relative overflow-hidden"
+          >
             <div className="absolute -top-3 left-6 bg-emerald-500 px-2 py-0.5 text-[10px] font-display font-bold text-black tracking-widest uppercase">
               RECRUTAMENTO-SINTÉTICO
             </div>
@@ -708,9 +729,11 @@ export default function UserRegistry({ isAdmin }: { isAdmin: boolean }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+          )}
+        </AnimatePresence>
+      </OverlayPortal>
     </section>
   );
 }

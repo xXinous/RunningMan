@@ -8,8 +8,12 @@ import { Timestamp } from 'firebase/firestore';
  * VISUAL = Imagens (fotos de locais, pistas, pessoas, itens)
  * TEXT   = Conteúdo textual (disquetes, documentos)
  * META   = Conquistas, flags de sistema, easter eggs
+ * VIDEO  = Gravações de vídeo (fitas VHS / discos DVD)
  */
-export type IntelType = 'AUDIO' | 'VISUAL' | 'TEXT' | 'META';
+export type IntelType = 'AUDIO' | 'VISUAL' | 'TEXT' | 'META' | 'VIDEO';
+
+/** Formato físico exibido no Nokia para itens de vídeo */
+export type VideoFormat = 'DVD' | 'VHS';
 
 /**
  * AccessLevel define o nível de sigilo RPG:
@@ -82,6 +86,12 @@ export interface IntelMetadata {
   unlockCondition?: string;
   /** ID da regra de achievement (para avaliação automática) */
   achievementRuleId?: string;
+  /** Formato físico do coletável de vídeo (DVD ou VHS) */
+  videoFormat?: VideoFormat;
+  /** Origem do vídeo: upload Firebase ou link YouTube */
+  videoSource?: 'upload' | 'youtube';
+  /** ID do vídeo no YouTube (quando videoSource === 'youtube') */
+  youtubeId?: string;
 }
 
 /**
@@ -116,6 +126,7 @@ export interface PlayerIntelCollection {
     visual: number;
     text: number;
     meta: number;
+    video: number;
   };
 }
 

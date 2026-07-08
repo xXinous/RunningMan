@@ -48,20 +48,7 @@ export default function CharacterSelectionScreen({ account, onSelect, onLogout }
 
   const loadCharacters = async () => {
     try {
-      let list = await fetchCharacters(account.uid);
-      
-      // Legacy Migration: If account has a masterName but NO characters,
-      // autonomously create the first character using the masterName.
-      if (list.length === 0 && account.masterName && account.masterName !== account.email) {
-        console.log("[Migration] Legacy account detected. Creating initial character...");
-        try {
-          const legacyChar = await createCharacter(account.uid, account.masterName);
-          list = [legacyChar];
-        } catch (migErr) {
-          console.error("Migration failed:", migErr);
-        }
-      }
-      
+      const list = await fetchCharacters(account.uid);
       setCharacters(list);
     } catch (err) {
       console.error(err);

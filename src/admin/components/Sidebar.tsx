@@ -28,8 +28,7 @@ export default function Sidebar({ activeTab, setActiveTab, isCollapsed, onToggle
     {
       title: "Conteúdo",
       items: [
-        { id: 'media', label: 'Central de Mídia', icon: 'cloud_upload' },
-        { id: 'intel', label: 'Acervo de Intel', icon: 'hub' },
+        { id: 'intel', label: 'Acervo', icon: 'hub' },
       ]
     },
     {

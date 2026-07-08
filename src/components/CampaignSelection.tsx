@@ -82,7 +82,8 @@ export default function CampaignSelection({
       (groups) => {
         characterGroups = groups;
         updateVisibleCampaigns();
-      }
+      },
+      playerData.uid
     );
 
     // Listen to active campaigns

@@ -9,7 +9,8 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import RetroSpinner from '../../components/player/RetroSpinner';
 import { activityLogger } from '../../services/ActivityLogger';
 import { CharacterData, PlayerStats, MasterAccount, Group } from '../../types/player';
-import BulkInventoryModal from './BulkInventoryModal';
+import { intelService } from '../../services/IntelService';
+import IntelDistributionDrawer from './IntelDistributionDrawer';
 import { useModal } from './ConfirmModal';
 import Screw from '../../components/player/Screw';
 import { ALL_ACHIEVEMENTS } from '../../data/achievements';
@@ -160,7 +161,7 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
   const handleRemoveIntel = async (intelId: string) => {
     const ok = await showConfirm('Remover Item', "Remover este item do inventário do agente?", 'Remover');
     if (!ok) return;
-    await userService.removeUserIntel(uid, character.id, intelId);
+    await intelService.revokeIntel(uid, character.id, intelId);
     activityLogger.logAdmin('gm.mpg', 'inventory_remove', `Removeu intel ${intelId} de ${character.codinome}`, { uid, charId: character.id, intelId });
     await loadDetails();
   };
@@ -463,11 +464,12 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
 
         {/* Modals */}
         {showGrantModal && (
-          <BulkInventoryModal 
+          <IntelDistributionDrawer
             uid={uid}
             character={character}
+            campaignId={character.campaignId}
             existingItemIds={new Set(details?.intel.map(t => t.id) || [])}
-            onClose={() => setShowGrantModal(false)} 
+            onClose={() => setShowGrantModal(false)}
             onSuccess={loadDetails}
           />
         )}

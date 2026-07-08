@@ -58,6 +58,7 @@ export default function NokiaSessionLayout() {
             registerBackHandler={playback.registerNokiaBackHandler}
             setBackVisible={playback.setNokiaBackVisible}
             activeCharacter={playerData.character}
+            characterId={playerData.activeCharacterId}
             uid={playerData.uid}
             onUpdatePhoneNumber={session.updatePhone}
           />

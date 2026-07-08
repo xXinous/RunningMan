@@ -5,7 +5,18 @@ import { PlayerStats } from '../../types/player';
 import { intelRegistry } from '../../data/intel_registry';
 import { activityLogger } from '../../services/ActivityLogger';
 
-export default function AnalyticsPanel() {
+type IntelSubTabId = 'acervo' | 'jukebox' | 'qr' | 'conquistas';
+
+interface MetricNavigationOptions {
+  intelSubTab?: IntelSubTabId;
+  scrollTo?: string;
+}
+
+interface AnalyticsPanelProps {
+  onNavigate?: (tab: string, options?: MetricNavigationOptions) => void;
+}
+
+export default function AnalyticsPanel({ onNavigate }: AnalyticsPanelProps = {}) {
   const [playEvents, setPlayEvents] = useState<PlayEvent[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
   const [audios, setAudios] = useState<AudioMetadata[]>([]);
@@ -100,14 +111,20 @@ export default function AnalyticsPanel() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Usuários Ativos" value={users.length} icon="group" color="text-primary" />
-        <KPICard label="Ativos 7d" value={displayAnalytics.activeUsers} icon="trending_up" color="text-tertiary" />
-        <KPICard label="Arquivos Áudio" value={audios.length} icon="library_music" color="text-secondary" />
-        <KPICard label="Eventos Play" value={aggregatedData?.totalPlays ?? playEvents.length} icon="play_circle" color="text-primary" />
+        <KPICard label="Usuários Ativos" value={users.length} icon="group" color="text-primary" onClick={() => onNavigate?.('players')} />
+        <KPICard label="Ativos 7d" value={displayAnalytics.activeUsers} icon="trending_up" color="text-tertiary" onClick={() => onNavigate?.('players')} />
+        <KPICard label="Arquivos Áudio" value={audios.length} icon="library_music" color="text-secondary" onClick={() => onNavigate?.('intel', { intelSubTab: 'acervo' })} />
+        <KPICard
+          label="Eventos Play"
+          value={aggregatedData?.totalPlays ?? playEvents.length}
+          icon="play_circle"
+          color="text-primary"
+          onClick={() => onNavigate?.('dashboard', { scrollTo: 'admin-analytics' })}
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl group hover:border-primary/20 transition-all">
+        <ClickableSection onClick={() => onNavigate?.('intel', { intelSubTab: 'acervo' })} className="bg-surface-container-low border border-primary/10 p-6 shadow-xl group hover:border-primary/20 transition-all">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-secondary text-base">cloud_done</span>
@@ -118,7 +135,7 @@ export default function AnalyticsPanel() {
           <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
             <div className="h-full bg-secondary shadow-[0_0_10px_rgba(198,198,198,0.2)] transition-all duration-1000" style={{ width: `${Math.min(analytics.storagePercentage, 100)}%` }} />
           </div>
-        </section>
+        </ClickableSection>
 
         <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl group hover:border-primary/20 transition-all">
           <div className="flex items-center justify-between mb-4">
@@ -176,7 +193,7 @@ export default function AnalyticsPanel() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
+        <ClickableSection onClick={() => onNavigate?.('intel', { intelSubTab: 'acervo' })} className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
           <div className="flex items-center gap-3 mb-8">
             <span className="material-symbols-outlined text-primary text-base">leaderboard</span>
             <h3 className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/40">Top Conteúdo (Plays)</h3>
@@ -205,9 +222,9 @@ export default function AnalyticsPanel() {
               })
             )}
           </div>
-        </section>
+        </ClickableSection>
 
-        <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
+        <ClickableSection onClick={() => onNavigate?.('players')} className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
           <div className="flex items-center gap-3 mb-8">
             <span className="material-symbols-outlined text-primary text-base">person_play</span>
             <h3 className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/40">Agentes Mais Ativos</h3>
@@ -235,11 +252,11 @@ export default function AnalyticsPanel() {
               })
             )}
           </div>
-        </section>
+        </ClickableSection>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
+        <ClickableSection onClick={() => onNavigate?.('intel', { intelSubTab: 'conquistas' })} className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
           <div className="flex items-center gap-3 mb-8">
             <span className="material-symbols-outlined text-primary text-base">stars</span>
             <h3 className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/40">Conquistas de Alta Raridade</h3>
@@ -262,10 +279,10 @@ export default function AnalyticsPanel() {
               </div>
             ))}
           </div>
-        </section>
+        </ClickableSection>
 
         <div className="space-y-6">
-          <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
+          <ClickableSection onClick={() => onNavigate?.('players')} className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
             <div className="flex items-center gap-3 mb-8">
               <span className="material-symbols-outlined text-primary text-base">group_add</span>
               <h3 className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/40">Crescimento de Rede (Semanal)</h3>
@@ -285,7 +302,7 @@ export default function AnalyticsPanel() {
                 })}
               </div>
             )}
-          </section>
+          </ClickableSection>
 
           <section className="bg-surface-container-low border border-primary/10 p-6 shadow-xl">
             <div className="flex items-center gap-3 mb-6">
@@ -305,9 +322,30 @@ export default function AnalyticsPanel() {
   );
 }
 
-function KPICard({ label, value, icon, color }: { label: string; value: number; icon: string; color: string }) {
-  return (
-    <div className="bg-surface-container-low border border-primary/10 p-5 shadow-xl relative overflow-hidden group hover:border-primary/30 transition-all">
+function KPICard({
+  label,
+  value,
+  icon,
+  color,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  icon: string;
+  color: string;
+  onClick?: () => void;
+}) {
+  const className = `bg-surface-container-low border border-primary/10 p-5 shadow-xl relative overflow-hidden group transition-all ${
+    onClick ? 'cursor-pointer hover:border-primary/40 active:scale-[0.98]' : 'hover:border-primary/30'
+  }`;
+
+  const content = (
+    <>
+      {onClick && (
+        <span className="absolute top-3 right-3 material-symbols-outlined text-sm text-primary/0 group-hover:text-primary/50 transition-all z-20">
+          arrow_forward
+        </span>
+      )}
       <div className="flex items-center justify-between relative z-10">
         <div>
           <p className="text-[10px] font-display font-bold uppercase tracking-widest text-industrial-silver/40 mb-2">{label.replace('_', ' ')}</p>
@@ -318,7 +356,37 @@ function KPICard({ label, value, icon, color }: { label: string; value: number; 
         </div>
       </div>
       <div className="absolute -bottom-1 -right-1 w-16 h-16 bg-white/5 rounded-full blur-2xl group-hover:bg-primary/5 transition-all" />
-    </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${className} text-left w-full`}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
+}
+
+function ClickableSection({
+  onClick,
+  className,
+  children,
+}: {
+  onClick?: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  if (!onClick) {
+    return <section className={className}>{children}</section>;
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={`${className} text-left w-full cursor-pointer hover:border-primary/40 active:scale-[0.99] transition-all`}>
+      {children}
+    </button>
   );
 }
 

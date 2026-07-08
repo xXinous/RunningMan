@@ -44,6 +44,13 @@ export interface CharacterData {
   agentId?: string; // Generated RM-XXXX ID
   unlockedCampaigns?: string[]; // IDs das campanhas desbloqueadas para este personagem
   phoneNumber?: string; // Random 10-digit US phone number, e.g. (555) 555-1234
+
+  /** Comando remoto do mestre: reproduzir vídeo na tela do jogador */
+  pendingVideoPlay?: {
+    intelId: string;
+    requestId: string;
+    triggeredAt?: Timestamp | null;
+  } | null;
 }
 
 export interface PlayerStats {
@@ -80,7 +87,7 @@ export interface GameEventsState {
   diskRepairAllowed: boolean;
 }
 
-// Character-level slot in a group (replaces account-level playerUids)
+// Character-level slot in a group
 export interface GroupCharacterSlot {
   uid: string;         // Master account UID
   characterId: string; // Character document ID
@@ -91,11 +98,10 @@ export interface Group {
   id: string;
   name: string;
   description?: string;
-  playerUids: string[];           // Legacy: account-level membership
-  characterSlots?: GroupCharacterSlot[]; // New: character-level membership
-  campaignId?: string;            // Legacy: Active campaign ID (deprecated in favor of unlockedCampaigns if multiple are allowed)
-  unlockedCampaigns?: string[];   // IDs das campanhas desbloqueadas para este grupo
-  sessions: string[]; // Lista de datas das sessões
+  characterSlots: GroupCharacterSlot[];
+  campaignId?: string;
+  unlockedCampaigns?: string[];
+  sessions: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

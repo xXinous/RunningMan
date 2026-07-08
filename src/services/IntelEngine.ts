@@ -1,4 +1,5 @@
-import type { IntelItem, IntelType, AccessLevel, VisualCategory } from '../types/intel';
+import type { IntelItem, IntelType, AccessLevel, VisualCategory, VideoFormat } from '../types/intel';
+import { extractYoutubeId, isYoutubeUrl } from '../lib/youtube';
 
 /**
  * ARCHITECTURE: UNIFIED INTEL ENGINE (OOP)
@@ -38,17 +39,17 @@ export abstract class IntelBase {
   }
 
   public getTypeLabel(): string {
-    const labels: Record<string, string> = { AUDIO: '📼 Áudio', TEXT: '💾 Textos', VISUAL: '📷 Imagens', META: '🏆 Conquistas' };
+    const labels: Record<string, string> = { AUDIO: '📼 Áudio', TEXT: '💾 Textos', VISUAL: '📷 Imagens', META: '🏆 Conquistas', VIDEO: '📺 Vídeo' };
     return labels[this.type] || '❓ Desconhecido';
   }
 
   public getTypeIcon(): string {
-    const icons: Record<string, string> = { AUDIO: '📼', TEXT: '💾', VISUAL: '📷', META: '🏆' };
+    const icons: Record<string, string> = { AUDIO: '📼', TEXT: '💾', VISUAL: '📷', META: '🏆', VIDEO: '📺' };
     return icons[this.type] || '📄';
   }
 
   public getTypeOrder(): number {
-    const order: Record<string, number> = { AUDIO: 0, TEXT: 1, VISUAL: 2, META: 3 };
+    const order: Record<string, number> = { AUDIO: 0, TEXT: 1, VISUAL: 2, VIDEO: 3, META: 4 };
     return order[this.type] ?? 99;
   }
 
@@ -122,7 +123,42 @@ export class TextIntel extends IntelBase {
   }
 }
 
-// 5. Concrete Strategy: Meta Intel (Achievements)
+// 5. Concrete Strategy: Video Intel (VHS/DVD)
+export class VideoIntel extends IntelBase {
+  public readonly mediaUrl: string;
+  public readonly format: VideoFormat;
+  public readonly videoSource: 'upload' | 'youtube';
+  public readonly youtubeId: string | null;
+
+  constructor(item: IntelItem) {
+    super(item);
+    this.mediaUrl = item.mediaUrl || '';
+    this.format = item.metadata?.videoFormat || 'VHS';
+    this.youtubeId =
+      item.metadata?.youtubeId ||
+      (isYoutubeUrl(this.mediaUrl) ? extractYoutubeId(this.mediaUrl) : null);
+    this.videoSource =
+      item.metadata?.videoSource || (this.youtubeId ? 'youtube' : 'upload');
+  }
+
+  public isYoutube(): boolean {
+    return this.videoSource === 'youtube' && !!this.youtubeId;
+  }
+
+  public getDetails() {
+    return {
+      source: this.mediaUrl,
+      format: this.format,
+      videoSource: this.videoSource,
+      youtubeId: this.youtubeId,
+      isYoutube: this.isYoutube(),
+      npc: this.metadata.npc || 'Arquivo de Vídeo',
+      duration: this.metadata.duration || 0,
+    };
+  }
+}
+
+// 6. Concrete Strategy: Meta Intel (Achievements)
 export class MetaIntel extends IntelBase {
   constructor(item: IntelItem) {
     super(item);
@@ -137,7 +173,7 @@ export class MetaIntel extends IntelBase {
   }
 }
 
-// 6. Intel Factory (Singleton)
+// 7. Intel Factory (Singleton)
 export class IntelFactory {
   private static instance: IntelFactory;
   private constructor() {}
@@ -152,13 +188,14 @@ export class IntelFactory {
       case 'AUDIO': return new AudioIntel(item);
       case 'VISUAL': return new VisualIntel(item);
       case 'TEXT': return new TextIntel(item);
+      case 'VIDEO': return new VideoIntel(item);
       case 'META': return new MetaIntel(item);
       default: throw new Error(`[IntelFactory] Tipo desconhecido: ${item.type}`);
     }
   }
 }
 
-// 7. Intel Manager (The Orchestrator)
+// 8. Intel Manager (The Orchestrator)
 export class IntelManager {
   private items: Map<string, IntelBase> = new Map();
   private factory = IntelFactory.getInstance();

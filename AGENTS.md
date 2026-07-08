@@ -169,7 +169,7 @@ Nunca commite `.env` com credenciais reais.
 - **Não** commite secrets, `.env` ou `firebase-applet-config.json` com chaves reais.
 - **Não** crie commits ou PRs sem o usuário pedir explicitamente.
 - **Não** adicione README/docs extras sem solicitação — este `AGENTS.md` é o índice para IAs.
-- Respeite o modelo **conta → personagem → intel**; dados legados em `tapes`/`gallery` estão em migração (`src/store/migration.ts`).
+- Respeite o modelo **conta → personagem → intel**; progresso fica em `users/{uid}/characters/{charId}/intel`.
 - Mini-apps (`BiosTerminal`, `LimboBoard`, `DiskRepairApp`, etc.) são experiências narrativas — preserve tom e imersão ao editar textos.
 
 ## Fluxo mental do jogador

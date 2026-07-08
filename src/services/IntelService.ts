@@ -1,18 +1,48 @@
 import type { IntelItem, PlayerIntelCollection, IntelType, AccessLevel } from '../types/intel';
 import type { PlayerData } from '../types/player';
 import type { GalleryImage } from '../types/player';
+import type { MediaAsset } from '../types/media';
 import { intelRegistry } from '../data/intel_registry';
-import { collection, onSnapshot } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  doc,
+  getDoc,
+  deleteDoc,
+  writeBatch,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { 
-  fetchAudioTapeById, 
+import { mediaService } from './MediaService';
+import {
+  fetchAudioTapeById,
   fetchAudioTapesByIds,
   fetchAllMediaAssets,
-  fetchQrRedirect, 
+  fetchQrRedirect,
   firestoreUnlockIntel,
   firestoreGrantAchievements,
   updateRemoteIntel,
+  broadcastVideoToCharacters,
+  type VideoBroadcastTarget,
 } from '../store/firestore';
+
+export interface IntelGrantTarget {
+  uid: string;
+  characterId: string;
+}
+
+export interface IntelGrantOptions {
+  campaignId?: string;
+  /** Quando definido, ignora personagens cujo status não é 'vivo'. */
+  aliveOnly?: boolean;
+  /** Mapa uid_characterId → agentStatus para filtro aliveOnly sem round-trip extra. */
+  agentStatusByKey?: Record<string, string>;
+}
+
+export interface IntelDeleteOptions {
+  /** Remove também o arquivo no Storage, se existir storagePath. */
+  deleteStorageFile?: boolean;
+}
 
 /**
  * IntelService — Serviço unificado para gerenciar todas as operações 
@@ -49,7 +79,23 @@ class IntelService {
         level: raw.metadata?.level || 1,
         campaignId: raw.campaignId,
       });
-    } else if (raw.type === 'image' || raw.type === 'video') {
+    } else if (raw.type === 'video') {
+      return intelRegistry.registerRemoteVideo({
+        id: raw.id,
+        title: raw.metadata?.title || raw.filename,
+        npc: raw.metadata?.npc,
+        chapter: raw.metadata?.chapter,
+        description: raw.metadata?.description,
+        url: raw.url,
+        duration: raw.metadata?.duration,
+        isSecret: raw.metadata?.isSecret,
+        level: raw.metadata?.level || 1,
+        campaignId: raw.campaignId,
+        videoFormat: raw.metadata?.videoFormat || 'VHS',
+        videoSource: raw.metadata?.videoSource,
+        youtubeId: raw.metadata?.youtubeId,
+      });
+    } else if (raw.type === 'image') {
       return intelRegistry.registerGalleryImage({
         id: raw.id,
         title: raw.metadata?.title || raw.filename,
@@ -137,6 +183,115 @@ class IntelService {
     await updateRemoteIntel(item);
   }
 
+  /**
+   * Concede um ou mais itens de Intel a múltiplos personagens (admin).
+   * Usa writeBatch com campaignId e type corretos.
+   */
+  public async grantIntel(
+    targets: IntelGrantTarget[],
+    intelIds: string[],
+    options?: IntelGrantOptions
+  ): Promise<number> {
+    if (targets.length === 0 || intelIds.length === 0) return 0;
+
+    const filteredTargets = options?.aliveOnly
+      ? targets.filter((t) => {
+          const key = `${t.uid}_${t.characterId}`;
+          const status = options.agentStatusByKey?.[key];
+          return status === undefined || status === 'vivo';
+        })
+      : targets;
+
+    if (filteredTargets.length === 0) return 0;
+
+    const BATCH_LIMIT = 450;
+    let grantCount = 0;
+    const operations: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = [];
+
+    for (const intelId of intelIds) {
+      const intel = intelRegistry.get(intelId);
+      const intelType = intel?.type ?? 'AUDIO';
+
+      for (const { uid, characterId } of filteredTargets) {
+        operations.push({
+          ref: doc(db, 'users', uid, 'characters', characterId, 'intel', intelId),
+          data: {
+            intelId,
+            type: intelType,
+            unlockedAt: serverTimestamp(),
+            campaignId: options?.campaignId ?? null,
+          },
+        });
+      }
+    }
+
+    for (let i = 0; i < operations.length; i += BATCH_LIMIT) {
+      const chunk = operations.slice(i, i + BATCH_LIMIT);
+      const batch = writeBatch(db);
+      chunk.forEach(({ ref, data }) => batch.set(ref, data, { merge: true }));
+      await batch.commit();
+      grantCount += chunk.length;
+    }
+
+    return grantCount;
+  }
+
+  /**
+   * Revoga um item de Intel do inventário de um personagem.
+   */
+  public async revokeIntel(uid: string, characterId: string, intelId: string): Promise<void> {
+    await deleteDoc(doc(db, 'users', uid, 'characters', characterId, 'intel', intelId));
+  }
+
+  /**
+   * Remove um Intel do catálogo (Firestore mediaAssets + registry).
+   * Opcionalmente remove o arquivo no Storage.
+   */
+  public async deleteIntel(item: IntelItem, options?: IntelDeleteOptions): Promise<void> {
+    const docSnap = await getDoc(doc(db, 'mediaAssets', item.id));
+    if (docSnap.exists() && options?.deleteStorageFile) {
+      const raw = docSnap.data() as { storagePath?: string; url?: string; filename?: string };
+      if (raw.storagePath) {
+        const asset: MediaAsset = {
+          id: item.id,
+          filename: raw.filename || item.id,
+          originalName: raw.filename || item.id,
+          url: raw.url || item.mediaUrl || '',
+          storagePath: raw.storagePath,
+          mimeType: '',
+          size: 0,
+          type: 'other',
+          uploadedAt: new Date(),
+          uploadedBy: '',
+          metadata: {},
+        };
+        try {
+          await mediaService.deleteMedia(asset);
+        } catch (err) {
+          console.warn('[IntelService] Storage delete failed, removing Firestore doc:', err);
+          await deleteDoc(doc(db, 'mediaAssets', item.id));
+        }
+      } else {
+        await deleteDoc(doc(db, 'mediaAssets', item.id));
+      }
+    } else if (docSnap.exists()) {
+      await deleteDoc(doc(db, 'mediaAssets', item.id));
+    }
+
+    intelRegistry.unregister(item.id);
+  }
+
+  /**
+   * Transmite vídeo para personagens (unlock opcional + pendingVideoPlay).
+   */
+  public async broadcastVideo(
+    targets: VideoBroadcastTarget[],
+    intelId: string,
+    options?: { grantIntel?: boolean; campaignId?: string }
+  ): Promise<string> {
+    return broadcastVideoToCharacters(targets, intelId, options);
+  }
+
   // --- Resolução ---
 
   /**
@@ -171,7 +326,7 @@ class IntelService {
    * Ponto de entrada unificado para todos os tipos de Intel (AUDIO, VISUAL, TEXT, META).
    * 
    * Nota: Achievements usam firestoreGrantAchievements (lógica separada de avaliação).
-   * Todos os outros tipos passam por aqui via firestoreUnlockIntel (dual-write tapes+intel).
+   * Demais tipos persistem em users/{uid}/characters/{charId}/intel.
    */
   public async unlock(
     playerData: PlayerData,
@@ -192,8 +347,7 @@ class IntelService {
   // --- Coleção do Jogador ---
 
   /**
-   * Monta a coleção completa de Intel do jogador,
-   * combinando tapes desbloqueados + gallery images.
+   * Monta a coleção completa de Intel do jogador a partir dos IDs desbloqueados.
    */
   public async getCollection(
     playerData: PlayerData
@@ -231,6 +385,7 @@ class IntelService {
       VISUAL: [],
       TEXT: [],
       META: [],
+      VIDEO: [],
     };
 
     const byLevel: Record<AccessLevel, IntelItem[]> = {
@@ -256,6 +411,7 @@ class IntelService {
         visual: byType.VISUAL.length,
         text: byType.TEXT.length,
         meta: byType.META.length,
+        video: byType.VIDEO.length,
       },
     };
   }

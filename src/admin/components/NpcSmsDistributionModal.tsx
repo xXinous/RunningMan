@@ -5,6 +5,7 @@ import { groupService } from '../../services/GroupService';
 import { npcMessages, NpcSmsDialogue } from '../../data/npcMessages';
 import { activityLogger } from '../../services/ActivityLogger';
 import Screw from '../../components/player/Screw';
+import OverlayPortal from './OverlayPortal';
 
 interface NpcSmsDistributionModalProps {
   group: Group;
@@ -139,6 +140,7 @@ export default function NpcSmsDistributionModal({ group, allCharacters, onClose,
   };
 
   return (
+    <OverlayPortal open onClose={loading ? undefined : onClose}>
     <div className="fixed inset-0 z-[120] flex justify-end bg-black/80 backdrop-blur-sm animate-fade-in" onClick={() => { if (!loading) onClose(); }}>
       <motion.div 
         initial={{ x: '100%' }} 
@@ -272,5 +274,6 @@ export default function NpcSmsDistributionModal({ group, allCharacters, onClose,
         )}
       </motion.div>
     </div>
+    </OverlayPortal>
   );
 }

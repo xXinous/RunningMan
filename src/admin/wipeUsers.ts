@@ -20,15 +20,9 @@ export interface WipeProgress {
  * Wipe completo do banco de usuários.
  * Deleta:
  *   - users/{uid}/characters/{charId}/intel/*
- *   - users/{uid}/characters/{charId}/tapes/*       (legado)
- *   - users/{uid}/characters/{charId}/gallery/*      (legado)
  *   - users/{uid}/characters/{charId}/achievements/*
  *   - users/{uid}/characters/{charId}/stats/*
  *   - users/{uid}/characters/{charId}
- *   - users/{uid}/tapes/*       (legado raiz)
- *   - users/{uid}/achievements/* (legado raiz)
- *   - users/{uid}/gallery/*      (legado raiz)
- *   - users/{uid}/stats/*        (legado raiz)
  *   - users/{uid}
  *   - playEvents/*
  *   - activityLog/*
@@ -74,7 +68,7 @@ export async function wipeAllUserData(
           const charId = charDoc.id;
 
           // Delete all known subcollections under each character
-          const subCollections = ['intel', 'tapes', 'gallery', 'achievements'];
+          const subCollections = ['intel', 'achievements'];
           for (const subName of subCollections) {
             await deleteSubcollection(`users/${uid}/characters/${charId}/${subName}`);
           }
@@ -88,13 +82,7 @@ export async function wipeAllUserData(
           await deleteDoc(doc(db, 'users', uid, 'characters', charId));
         }
 
-        // 2b. Delete root-level legacy subcollections (pre-migration)
-        const rootSubs = ['tapes', 'achievements', 'gallery'];
-        for (const subName of rootSubs) {
-          await deleteSubcollection(`users/${uid}/${subName}`);
-        }
-
-        // Delete root stats/main
+        // Delete root stats/main (contas antigas sem personagem)
         try {
           await deleteDoc(doc(db, 'users', uid, 'stats', 'main'));
         } catch { /* may not exist */ }

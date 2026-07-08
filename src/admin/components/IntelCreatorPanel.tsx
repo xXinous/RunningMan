@@ -1,25 +1,36 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import QRCode from 'react-qr-code';
-import { intelRegistry, type EvidenceIntelAdmin } from '../../data/intel_registry';
+import { intelRegistry } from '../../data/intel_registry';
 import { intelService } from '../../services/IntelService';
-import type { IntelItem, IntelType, AccessLevel, VisualCategory } from '../../types/intel';
-import { ACCESS_LEVEL_LABELS } from '../../types/intel';
+import type { IntelItem, IntelType, AccessLevel, VisualCategory, VideoFormat } from '../../types/intel';
 import Screw from '../../components/player/Screw';
 import MediaSelectorModal from './MediaSelectorModal';
+import MediaUploadZone from './media/MediaUploadZone';
 import { MediaAsset } from '../../types/media';
+import { mediaService } from '../../services/MediaService';
+import { extractYoutubeId, isYoutubeUrl, youtubeWatchUrl } from '../../lib/youtube';
+import OverlayPortal from './OverlayPortal';
+import { useModal } from './ConfirmModal';
+import {
+  INTEL_TYPE_OPTIONS,
+  INTEL_STATUS_FILTER_LABELS,
+  accessLevelClass,
+  accessLevelLabel,
+  formatFileSize,
+  getIntelCatalogStatus,
+  intelCatalogStatusClass,
+  intelCatalogStatusLabel,
+  matchesIntelStatusFilter,
+  type IntelStatusFilter,
+} from '../lib/intelDisplay';
 
 /**
  * IntelCreatorPanel — Interface administrativa para criar e gerenciar 
  * itens no IntelRegistry em tempo real.
  */
 
-const TYPE_OPTIONS: { value: IntelType; label: string; icon: string }[] = [
-  { value: 'AUDIO', label: 'Áudio', icon: 'album' },
-  { value: 'TEXT', label: 'Texto', icon: 'save' },
-  { value: 'VISUAL', label: 'Visual', icon: 'photo_library' },
-  { value: 'META', label: 'Meta', icon: 'emoji_events' },
-];
+const TYPE_OPTIONS = INTEL_TYPE_OPTIONS;
 
 const LEVEL_OPTIONS: { value: AccessLevel; label: string }[] = [
   { value: 1, label: 'RESTRITO' },
@@ -43,6 +54,7 @@ const EMPTY_ITEM: Omit<IntelItem, 'id'> = {
     chapter: '',
     duration: 0,
     isSecret: false,
+    videoFormat: 'VHS' as VideoFormat,
   },
 };
 
@@ -51,15 +63,26 @@ const detectTypeFromUrl = (url: string): IntelType => {
   const ext = cleanUrl.split('.').pop()?.toLowerCase();
   if (!ext) return 'TEXT';
   if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return 'AUDIO';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'mp4', 'webm', 'mov'].includes(ext)) return 'VISUAL';
+  if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'VIDEO';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return 'VISUAL';
   if (['txt'].includes(ext)) return 'TEXT';
   return 'TEXT';
 };
 
+const detectTypeFromUrlWithYoutube = (url: string): IntelType => {
+  if (isYoutubeUrl(url)) return 'VIDEO';
+  return detectTypeFromUrl(url);
+};
+
 export default function IntelCreatorPanel() {
+  const { showConfirm, modal } = useModal();
   const [allItems, setAllItems] = useState<IntelItem[]>(() => intelRegistry.getAll());
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<IntelType | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<IntelStatusFilter>('all');
+  const [mediaAssetMap, setMediaAssetMap] = useState<Record<string, MediaAsset>>({});
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState(0);
   const [showEditor, setShowEditor] = useState(false);
   const [editingItem, setEditingItem] = useState<IntelItem | null>(null);
   const [formData, setFormData] = useState<Omit<IntelItem, 'id'> & { id: string }>({ id: '', ...EMPTY_ITEM });
@@ -68,6 +91,10 @@ export default function IntelCreatorPanel() {
   const [isLoading, setIsLoading] = useState(false);
   const [qrCodeModal, setQrCodeModal] = useState<IntelItem | null>(null);
   const [isMediaSelectorOpen, setIsMediaSelectorOpen] = useState(false);
+  const [youtubeInput, setYoutubeInput] = useState('');
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
+  const mediaFileInputRef = useRef<HTMLInputElement>(null);
 
   const refreshItems = useCallback(() => {
     setAllItems(intelRegistry.getAll());
@@ -82,16 +109,30 @@ export default function IntelCreatorPanel() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    const unsub = mediaService.subscribeToMedia((assets) => {
+      const map: Record<string, MediaAsset> = {};
+      assets.forEach((a) => {
+        map[a.id] = a;
+      });
+      setMediaAssetMap(map);
+    });
+    return unsub;
+  }, []);
+
   const filteredItems = useMemo(() => {
-    return allItems.filter(item => {
+    return allItems.filter((item) => {
+      const asset = mediaAssetMap[item.id];
       const matchesType = filterType === 'ALL' || item.type === filterType;
-      const matchesSearch = search === '' || 
+      const matchesStatus = matchesIntelStatusFilter(item, statusFilter, asset);
+      const matchesSearch =
+        search === '' ||
         (item.title || '').toLowerCase().includes(search.toLowerCase()) ||
         (item.id || '').toLowerCase().includes(search.toLowerCase()) ||
         (item.description || '').toLowerCase().includes(search.toLowerCase());
-      return matchesType && matchesSearch;
+      return matchesType && matchesStatus && matchesSearch;
     });
-  }, [allItems, search, filterType]);
+  }, [allItems, search, filterType, statusFilter, mediaAssetMap]);
   const handleNewItem = () => {
     setEditingItem(null);
     setFormData({ id: `item-${Date.now()}`, ...EMPTY_ITEM });
@@ -100,13 +141,152 @@ export default function IntelCreatorPanel() {
   };
 
   const handleMediaSelect = (asset: MediaAsset) => {
-    const detectedType = detectTypeFromUrl(asset.url);
-    setFormData(prev => ({ 
-      ...prev, 
+    const keepVideo = formData.type === 'VIDEO' || asset.type === 'video';
+    const detectedType = keepVideo ? 'VIDEO' : detectTypeFromUrlWithYoutube(asset.url);
+    setFormData(prev => ({
+      ...prev,
       mediaUrl: asset.url,
       type: detectedType,
-      title: prev.title || asset.metadata.title || asset.filename
+      title: prev.title || asset.metadata.title || asset.filename,
+      metadata: {
+        ...prev.metadata,
+        videoSource: asset.type === 'video' ? 'upload' : prev.metadata?.videoSource,
+        youtubeId: undefined,
+        duration: asset.metadata.duration || prev.metadata?.duration,
+      },
     }));
+  };
+
+  const handleMediaFileUpload = async (files: FileList | null) => {
+    if (!files?.[0]) return;
+    const file = files[0];
+    const isVideo = file.type.startsWith('video/');
+    const isAudio = file.type.startsWith('audio/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isAudio && !isImage) {
+      setFeedback({ type: 'error', text: 'Selecione áudio, imagem ou vídeo.' });
+      return;
+    }
+    setMediaUploading(true);
+    setFeedback(null);
+    try {
+      const asset = await mediaService.uploadMedia(file, 'gm.mpg');
+      const detectedType: IntelType = isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : 'VISUAL';
+      setFormData((prev) => ({
+        ...prev,
+        type: detectedType,
+        mediaUrl: asset.url,
+        title: prev.title || asset.metadata.title || file.name.replace(/\.[^/.]+$/, ''),
+        metadata: {
+          ...prev.metadata,
+          videoSource: isVideo ? 'upload' : prev.metadata?.videoSource,
+          youtubeId: isVideo ? undefined : prev.metadata?.youtubeId,
+          duration: asset.metadata.duration || prev.metadata?.duration,
+        },
+      }));
+      if (isVideo) setYoutubeInput('');
+      setFeedback({ type: 'success', text: 'Arquivo enviado com sucesso.' });
+    } catch (err) {
+      console.error('[IntelCreator] Media upload failed:', err);
+      setFeedback({ type: 'error', text: 'Falha no upload.' });
+    } finally {
+      setMediaUploading(false);
+      if (mediaFileInputRef.current) mediaFileInputRef.current.value = '';
+    }
+  };
+
+  const handleBulkUpload = async (files: FileList) => {
+    setBulkUploading(true);
+    setBulkUploadProgress(0);
+    setFeedback(null);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        await mediaService.uploadMedia(files[i], 'gm.mpg', (progress) => {
+          setBulkUploadProgress(progress);
+        });
+      }
+      setFeedback({
+        type: 'success',
+        text: `✓ ${files.length} arquivo(s) enviado(s). Filtre por Órfãos para completar metadados.`,
+      });
+    } catch (err) {
+      console.error('[Acervo] Bulk upload failed:', err);
+      setFeedback({ type: 'error', text: 'Falha no upload de um ou mais arquivos.' });
+    } finally {
+      setBulkUploading(false);
+      setBulkUploadProgress(0);
+    }
+  };
+
+  const handleDeleteFileOnly = async (item: IntelItem) => {
+    const asset = mediaAssetMap[item.id];
+    if (!asset?.storagePath) {
+      setFeedback({ type: 'error', text: 'Este item não possui arquivo no Storage.' });
+      return;
+    }
+    const ok = await showConfirm(
+      'Remover arquivo',
+      `Remover apenas o arquivo "${asset.filename}" do Storage? A entrada no acervo também será removida.`,
+      'Remover arquivo'
+    );
+    if (!ok) return;
+    try {
+      await mediaService.deleteMedia(asset);
+      intelRegistry.unregister(item.id);
+      refreshItems();
+      setFeedback({ type: 'success', text: `✓ Arquivo de "${item.title}" removido.` });
+    } catch (err) {
+      console.error('[Acervo] File delete failed:', err);
+      setFeedback({ type: 'error', text: 'Falha ao remover arquivo.' });
+    }
+  };
+
+  const handleDeleteItem = async (item: IntelItem) => {
+    const ok = await showConfirm(
+      'Remover Intel',
+      `Remover "${item.title}" do catálogo? Jogadores que já possuem o item mantêm no inventário. O arquivo no Storage não será removido automaticamente.`,
+      'Remover'
+    );
+    if (!ok) return;
+    const deleteFile = await showConfirm(
+      'Arquivo de mídia',
+      'Deseja também remover o arquivo do Storage (se existir)?',
+      'Remover arquivo'
+    );
+    setIsLoading(true);
+    try {
+      await intelService.deleteIntel(item, { deleteStorageFile: deleteFile });
+      refreshItems();
+      setFeedback({ type: 'success', text: `✓ "${item.title}" removido do acervo.` });
+    } catch (err) {
+      console.error('[IntelCreator] Delete failed:', err);
+      setFeedback({ type: 'error', text: 'Falha ao remover item.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVideoFileUpload = handleMediaFileUpload;
+
+  const handleApplyYoutubeLink = () => {
+    const url = youtubeInput.trim();
+    const id = extractYoutubeId(url);
+    if (!id) {
+      setFeedback({ type: 'error', text: 'URL do YouTube inválida.' });
+      return;
+    }
+    setFormData(prev => ({
+      ...prev,
+      type: 'VIDEO',
+      mediaUrl: youtubeWatchUrl(id),
+      title: prev.title || `YouTube — ${id}`,
+      metadata: {
+        ...prev.metadata,
+        videoSource: 'youtube',
+        youtubeId: id,
+      },
+    }));
+    setFeedback({ type: 'success', text: 'Link do YouTube vinculado.' });
   };
 
   const handleEditItem = (item: IntelItem) => {
@@ -132,8 +312,18 @@ export default function IntelCreatorPanel() {
         hint: item.metadata?.hint || '',
         unlockCondition: item.metadata?.unlockCondition || '',
         achievementRuleId: item.metadata?.achievementRuleId || '',
+        videoFormat: item.metadata?.videoFormat || 'VHS',
+        videoSource: item.metadata?.videoSource,
+        youtubeId: item.metadata?.youtubeId,
       },
     });
+    setYoutubeInput(
+      item.metadata?.youtubeId
+        ? youtubeWatchUrl(item.metadata.youtubeId)
+        : item.type === 'VIDEO' && isYoutubeUrl(item.mediaUrl || '')
+          ? item.mediaUrl || ''
+          : ''
+    );
     setShowEditor(true);
     setFeedback(null);
   };
@@ -144,6 +334,18 @@ export default function IntelCreatorPanel() {
       return;
     }
     const cleanMeta = { ...formData.metadata };
+
+    if (formData.type === 'VIDEO' && formData.mediaUrl) {
+      const ytId = extractYoutubeId(formData.mediaUrl);
+      if (ytId) {
+        cleanMeta.videoSource = 'youtube';
+        cleanMeta.youtubeId = ytId;
+      } else if (!cleanMeta.videoSource) {
+        cleanMeta.videoSource = 'upload';
+        delete cleanMeta.youtubeId;
+      }
+    }
+
     Object.keys(cleanMeta).forEach(key => {
       const val = (cleanMeta as any)[key];
       if (val === '' || val === 0 || val === false || val === undefined) {
@@ -192,7 +394,7 @@ export default function IntelCreatorPanel() {
   const updateMeta = (field: string, value: any) => setFormData(prev => ({ ...prev, metadata: { ...prev.metadata, [field]: value } }));
 
   const typeStats = useMemo(() => {
-    const stats: Record<string, number> = { AUDIO: 0, TEXT: 0, VISUAL: 0, META: 0, total: 0 };
+    const stats: Record<string, number> = { AUDIO: 0, TEXT: 0, VISUAL: 0, META: 0, VIDEO: 0, total: 0 };
     allItems.forEach(item => { stats[item.type]++; stats.total++; });
     return stats;
   }, [allItems]);
@@ -265,18 +467,21 @@ export default function IntelCreatorPanel() {
 
   return (
     <section className="space-y-8 font-sans">
+      {modal}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="w-1.5 h-8 bg-primary shadow-[0_0_10px_rgba(255,140,0,0.4)]" />
           <div>
             <h2 className="font-display font-bold uppercase tracking-widest text-lg text-white flex items-center gap-3">
-              Criador de Intel
+              Acervo
               {isLoading && (
                 <span className="inline-block w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               )}
             </h2>
-            <p className="text-[10px] font-display font-bold text-industrial-silver/40 uppercase tracking-widest mt-1">Gestão do Registro Mestre de Colecionáveis</p>
+            <p className="text-[10px] font-display font-bold text-industrial-silver/40 uppercase tracking-widest mt-1">
+              Intel, arquivos e metadados em um só lugar
+            </p>
           </div>
         </div>
         <div className="flex gap-4">
@@ -288,6 +493,12 @@ export default function IntelCreatorPanel() {
           </button>
         </div>
       </div>
+
+      <MediaUploadZone
+        onUpload={handleBulkUpload}
+        uploading={bulkUploading}
+        uploadProgress={bulkUploadProgress}
+      />
 
       {/* Stats Bar */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -311,6 +522,8 @@ export default function IntelCreatorPanel() {
         isOpen={isMediaSelectorOpen}
         onClose={() => setIsMediaSelectorOpen(false)}
         onSelect={handleMediaSelect}
+        allowedTypes={formData.type === 'VIDEO' ? ['video'] : undefined}
+        title={formData.type === 'VIDEO' ? 'Selecionar Vídeo' : 'Selecionar Mídia'}
       />
       {feedback && (
         <div className={`p-4 border text-[11px] font-display font-bold uppercase tracking-[0.2em] rounded-sm shadow-lg animate-in slide-in-from-top-4 ${feedback.type === 'success' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5' : 'border-red-500/30 text-red-400 bg-red-500/5'}`}>
@@ -322,6 +535,23 @@ export default function IntelCreatorPanel() {
       )}
 
       {/* Filters */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(INTEL_STATUS_FILTER_LABELS) as IntelStatusFilter[]).map((key) => (
+            <button
+              key={key}
+              onClick={() => setStatusFilter(key)}
+              className={`px-4 py-2 text-[10px] font-display font-bold uppercase tracking-widest border transition-all rounded-sm ${
+                statusFilter === key
+                  ? 'border-amber-500/50 text-amber-400 bg-amber-500/10'
+                  : 'border-white/5 text-industrial-silver/30 hover:text-industrial-silver/60 hover:bg-white/5'
+              }`}
+            >
+              {INTEL_STATUS_FILTER_LABELS[key]}
+            </button>
+          ))}
+        </div>
+
       <div className="flex flex-col lg:flex-row gap-4 items-center bg-black/20 p-4 border border-white/5">
         <div className="relative w-full lg:max-w-xs group">
            <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-industrial-silver/20 text-base group-focus-within:text-primary transition-colors">search</span>
@@ -352,14 +582,17 @@ export default function IntelCreatorPanel() {
           ))}
         </div>
       </div>
+      </div>
 
       {/* Items Grid */}
       <div className="bg-surface-container-low border border-white/5 overflow-hidden shadow-xl">
-        <div className="hidden lg:grid grid-cols-[80px_1fr_120px_120px_120px_100px] gap-0 text-[10px] font-display font-bold uppercase text-industrial-silver/40 tracking-[0.2em] px-8 py-4 border-b border-white/5 bg-black/40">
+        <div className="hidden lg:grid grid-cols-[72px_1fr_100px_80px_100px_100px_100px_minmax(140px,1fr)] gap-0 text-[10px] font-display font-bold uppercase text-industrial-silver/40 tracking-[0.2em] px-8 py-4 border-b border-white/5 bg-black/40">
           <span>TIPO</span>
           <span>IDENTIFICADOR / TÍTULO</span>
+          <span>STATUS</span>
+          <span>ARQUIVO</span>
           <span>CAPÍTULO</span>
-          <span>VÍNCULO NPC</span>
+          <span>NPC</span>
           <span>ACESSO</span>
           <span className="text-right">AÇÕES</span>
         </div>
@@ -369,8 +602,12 @@ export default function IntelCreatorPanel() {
               SINAL DE INTEL INEXISTENTE
             </div>
           ) : (
-            filteredItems.map(item => (
-              <div key={item.id} className="grid grid-cols-1 lg:grid-cols-[80px_1fr_120px_120px_120px_100px] gap-4 lg:gap-0 px-8 py-5 items-center group hover:bg-primary/5 transition-all border-b border-white/5 lg:border-none">
+            filteredItems.map((item) => {
+              const asset = mediaAssetMap[item.id];
+              const catalogStatus = getIntelCatalogStatus(item, asset);
+              const isOrphan = catalogStatus === 'orphan';
+              return (
+              <div key={item.id} className="grid grid-cols-1 lg:grid-cols-[72px_1fr_100px_80px_100px_100px_100px_minmax(140px,1fr)] gap-4 lg:gap-0 px-8 py-5 items-center group hover:bg-primary/5 transition-all border-b border-white/5 lg:border-none">
                 <div className="flex items-center gap-3 lg:block">
                   <span className="material-symbols-outlined text-xl text-industrial-silver/20 group-hover:text-primary transition-colors">
                     {TYPE_OPTIONS.find(t => t.value === item.type)?.icon || 'description'}
@@ -381,6 +618,29 @@ export default function IntelCreatorPanel() {
                 <div className="min-w-0 lg:pr-4">
                   <p className="text-sm font-display font-bold text-white truncate uppercase tracking-wide group-hover:text-primary transition-colors">{item.title}</p>
                   <p className="text-[10px] font-mono text-industrial-silver/20 truncate font-bold uppercase mt-0.5 tracking-tighter">{item.id}</p>
+                  {isOrphan && (
+                    <button
+                      type="button"
+                      onClick={() => handleEditItem(item)}
+                      className="mt-2 text-[8px] font-display font-bold uppercase tracking-widest text-primary hover:text-primary-container transition-colors"
+                    >
+                      Completar metadados →
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex lg:block items-center justify-between">
+                  <span className="lg:hidden text-[9px] font-display font-bold text-industrial-silver/20 uppercase">Status:</span>
+                  <span className={`text-[8px] font-display font-bold uppercase tracking-widest px-2 py-0.5 rounded-sm border ${intelCatalogStatusClass(catalogStatus)}`}>
+                    {intelCatalogStatusLabel(catalogStatus)}
+                  </span>
+                </div>
+
+                <div className="flex lg:block items-center justify-between">
+                  <span className="lg:hidden text-[9px] font-display font-bold text-industrial-silver/20 uppercase">Arquivo:</span>
+                  <span className="text-[9px] font-mono text-industrial-silver/40 uppercase">
+                    {asset?.size ? formatFileSize(asset.size) : '—'}
+                  </span>
                 </div>
                 
                 <div className="flex lg:block items-center justify-between">
@@ -395,12 +655,25 @@ export default function IntelCreatorPanel() {
 
                 <div className="flex lg:block items-center justify-between">
                   <span className="lg:hidden text-[9px] font-display font-bold text-industrial-silver/20 uppercase">Acesso:</span>
-                   <span className={`text-[9px] font-display font-bold uppercase tracking-widest px-2 py-0.5 rounded-sm border ${item.level >= 4 ? 'border-red-500/30 text-red-500 bg-red-500/5' : item.level >= 2 ? 'border-primary/30 text-primary/70' : 'border-white/5 text-industrial-silver/30'}`}>
-                     {ACCESS_LEVEL_LABELS[item.level]}
+                   <span className={`text-[9px] font-display font-bold uppercase tracking-widest px-2 py-0.5 rounded-sm border ${accessLevelClass(item.level)}`}>
+                     {accessLevelLabel(item.level)}
                    </span>
                 </div>
 
-                <div className="text-right border-t border-white/5 lg:border-none pt-4 lg:pt-0 flex items-center justify-end gap-2">
+                <div className="text-right border-t border-white/5 lg:border-none pt-4 lg:pt-0 flex items-center justify-end gap-1 flex-wrap">
+                  {item.type === 'AUDIO' && item.mediaUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const a = new Audio(item.mediaUrl!);
+                        a.play();
+                      }}
+                      className="p-2.5 text-industrial-silver/30 hover:text-primary hover:bg-primary/10 rounded-sm transition-all material-symbols-outlined text-xl"
+                      title="Ouvir prévia"
+                    >
+                      play_arrow
+                    </button>
+                  )}
                   <button
                     onClick={() => setQrCodeModal(item)}
                     className="p-2.5 text-industrial-silver/30 hover:text-primary hover:bg-primary/10 rounded-sm transition-all material-symbols-outlined text-xl"
@@ -415,14 +688,32 @@ export default function IntelCreatorPanel() {
                   >
                     edit_note
                   </button>
+                  {asset?.storagePath && (
+                    <button
+                      onClick={() => handleDeleteFileOnly(item)}
+                      className="p-2.5 text-industrial-silver/30 hover:text-amber-400 hover:bg-amber-500/10 rounded-sm transition-all material-symbols-outlined text-xl"
+                      title="Remover só arquivo"
+                    >
+                      folder_delete
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDeleteItem(item)}
+                    className="p-2.5 text-industrial-silver/30 hover:text-red-400 hover:bg-red-500/10 rounded-sm transition-all material-symbols-outlined text-xl"
+                    title="Remover do Acervo"
+                  >
+                    delete
+                  </button>
                 </div>
                 </div>
-                ))
+              );
+            })
                 )}
                 </div>
                 </div>
 
                 {qrCodeModal && (
+                <OverlayPortal open={!!qrCodeModal} onClose={() => setQrCodeModal(null)}>
                 <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 p-4 backdrop-blur-md">
                 <div className="bg-surface-container-low border border-primary/30 p-8 w-full max-w-sm rounded-sm shadow-2xl flex flex-col items-center relative">
                 <div className="absolute -top-3 left-6 bg-primary px-2 py-0.5 text-[10px] font-display font-bold text-black tracking-widest uppercase">
@@ -469,10 +760,12 @@ export default function IntelCreatorPanel() {
                 </button>
                 </div>
                 </div>
+                </OverlayPortal>
                 )}
 
                 {/* Editor Modal */}
 
+      <OverlayPortal open={showEditor} onClose={() => setShowEditor(false)}>
       {showEditor && (
         <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
           <div className="bg-surface-container-low border border-primary/30 w-full max-w-2xl rounded-sm shadow-2xl flex flex-col max-h-[90vh] relative">
@@ -586,27 +879,123 @@ export default function IntelCreatorPanel() {
               )}
 
               {(formData.type === 'AUDIO' || formData.type === 'VISUAL') && (
-                <div className="group">
-                  <label className="text-[9px] font-display font-bold text-industrial-silver/40 uppercase tracking-[0.2em] mb-2 block group-focus-within:text-primary transition-colors">
-                    Vetor de Mídia (URL {formData.type === 'AUDIO' ? 'Áudio' : 'Imagem'})
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      value={formData.mediaUrl || ''}
-                      onChange={e => updateField('mediaUrl', e.target.value)}
-                      className="flex-1 bg-surface-container-lowest border-none py-4 px-4 text-white font-mono text-sm tracking-widest outline-none transition-all"
-                      placeholder="https://servidor.remoto/arquivo"
-                    />
+                <div className="space-y-4 border border-white/5 bg-black/20 p-5 rounded-sm">
+                  <p className="text-[9px] font-display font-bold text-industrial-silver/40 uppercase tracking-[0.2em]">
+                    Mídia — {formData.type === 'AUDIO' ? 'Áudio' : 'Imagem'}
+                  </p>
+                  <input
+                    ref={mediaFileInputRef}
+                    type="file"
+                    accept={formData.type === 'AUDIO' ? 'audio/*' : 'image/*'}
+                    className="hidden"
+                    onChange={(e) => handleMediaFileUpload(e.target.files)}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={mediaUploading}
+                      onClick={() => mediaFileInputRef.current?.click()}
+                      className="py-4 border border-primary/30 bg-primary/5 text-primary hover:bg-primary hover:text-black transition-all rounded-sm flex items-center justify-center gap-2 font-display font-bold text-[9px] uppercase tracking-widest disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-base">upload_file</span>
+                      {mediaUploading ? 'Enviando...' : 'Upload de Arquivo'}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setIsMediaSelectorOpen(true)}
-                      className="bg-primary/10 border border-primary/30 text-primary px-4 hover:bg-primary hover:text-black transition-all rounded-sm flex items-center justify-center gap-2 font-display font-bold text-[9px] uppercase tracking-widest"
+                      className="py-4 border border-white/10 bg-black/30 text-industrial-silver/60 hover:text-white hover:border-white/20 transition-all rounded-sm flex items-center justify-center gap-2 font-display font-bold text-[9px] uppercase tracking-widest"
                     >
                       <span className="material-symbols-outlined text-base">perm_media</span>
-                      BIBLIOTECA
+                      Biblioteca
                     </button>
                   </div>
-                  <div className="h-0.5 w-0 bg-primary transition-all duration-300 group-focus-within:w-full" />
+                  <input
+                    value={formData.mediaUrl || ''}
+                    onChange={(e) => updateField('mediaUrl', e.target.value)}
+                    className="w-full bg-surface-container-lowest border-none py-4 px-4 text-white font-mono text-sm tracking-widest outline-none transition-all"
+                    placeholder="Ou cole a URL do arquivo..."
+                  />
+                </div>
+              )}
+
+              {formData.type === 'VIDEO' && (
+                <div className="space-y-4 border border-white/5 bg-black/20 p-5 rounded-sm">
+                  <p className="text-[9px] font-display font-bold text-industrial-silver/40 uppercase tracking-[0.2em]">
+                    Fonte do Vídeo
+                  </p>
+
+                  <input
+                    ref={videoFileInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={(e) => handleVideoFileUpload(e.target.files)}
+                  />
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={mediaUploading}
+                      onClick={() => videoFileInputRef.current?.click()}
+                      className="py-4 border border-primary/30 bg-primary/5 text-primary hover:bg-primary hover:text-black transition-all rounded-sm flex items-center justify-center gap-2 font-display font-bold text-[9px] uppercase tracking-widest disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-base">upload_file</span>
+                      {mediaUploading ? 'Enviando...' : 'Upload de Arquivo'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsMediaSelectorOpen(true)}
+                      className="py-4 border border-white/10 bg-black/30 text-industrial-silver/60 hover:text-white hover:border-white/20 transition-all rounded-sm flex items-center justify-center gap-2 font-display font-bold text-[9px] uppercase tracking-widest"
+                    >
+                      <span className="material-symbols-outlined text-base">perm_media</span>
+                      Biblioteca
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      value={youtubeInput}
+                      onChange={(e) => setYoutubeInput(e.target.value)}
+                      className="flex-1 bg-surface-container-lowest border-none py-3 px-4 text-white font-mono text-xs tracking-wide outline-none"
+                      placeholder="https://youtube.com/watch?v=... ou youtu.be/..."
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyYoutubeLink}
+                      className="px-4 border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-all rounded-sm font-display font-bold text-[9px] uppercase tracking-widest shrink-0"
+                    >
+                      YouTube
+                    </button>
+                  </div>
+
+                  {formData.mediaUrl && (
+                    <div className="text-[9px] font-mono text-industrial-silver/40 truncate pt-1 border-t border-white/5">
+                      {formData.metadata?.videoSource === 'youtube' ? (
+                        <span className="text-red-400/80">[YOUTUBE]</span>
+                      ) : (
+                        <span className="text-primary/80">[UPLOAD]</span>
+                      )}{' '}
+                      {formData.mediaUrl}
+                    </div>
+                  )}
+
+                  {formData.mediaUrl && formData.metadata?.videoSource !== 'youtube' && (
+                    <div className="aspect-video bg-black border border-white/10 overflow-hidden max-h-48">
+                      <video src={formData.mediaUrl} controls className="w-full h-full object-contain" preload="metadata" />
+                    </div>
+                  )}
+
+                  {formData.metadata?.youtubeId && (
+                    <div className="aspect-video bg-black border border-red-500/20 overflow-hidden max-h-48">
+                      <iframe
+                        src={`https://www.youtube.com/embed/${formData.metadata.youtubeId}`}
+                        title="Preview YouTube"
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -636,6 +1025,27 @@ export default function IntelCreatorPanel() {
                       <input type="number" value={formData.metadata?.duration || ''} onChange={e => updateMeta('duration', parseInt(e.target.value) || 0)} className="w-full bg-surface-container-lowest border-none py-3 px-3 text-white font-mono font-bold text-[10px] outline-none transition-all" />
                       <div className="h-0.5 w-0 bg-primary transition-all duration-300 group-focus-within:w-full" />
                     </div>
+                  )}
+                  {formData.type === 'VIDEO' && (
+                    <>
+                      <div className="group">
+                        <label className="text-[8px] font-display font-bold text-industrial-silver/30 uppercase block mb-2 tracking-widest group-focus-within:text-primary transition-colors">FORMATO FÍSICO</label>
+                        <select
+                          value={formData.metadata?.videoFormat || 'VHS'}
+                          onChange={e => updateMeta('videoFormat', e.target.value as VideoFormat)}
+                          className="w-full bg-surface-container-lowest border-none py-3 px-3 text-primary font-display font-bold text-[10px] outline-none transition-all uppercase cursor-pointer"
+                        >
+                          <option value="VHS">VHS (Fita)</option>
+                          <option value="DVD">DVD (Disco)</option>
+                        </select>
+                        <div className="h-0.5 w-0 bg-primary transition-all duration-300 group-focus-within:w-full" />
+                      </div>
+                      <div className="group">
+                        <label className="text-[8px] font-display font-bold text-industrial-silver/30 uppercase block mb-2 tracking-widest group-focus-within:text-primary transition-colors">DURAÇÃO (SEG)</label>
+                        <input type="number" value={formData.metadata?.duration || ''} onChange={e => updateMeta('duration', parseInt(e.target.value) || 0)} className="w-full bg-surface-container-lowest border-none py-3 px-3 text-white font-mono font-bold text-[10px] outline-none transition-all" />
+                        <div className="h-0.5 w-0 bg-primary transition-all duration-300 group-focus-within:w-full" />
+                      </div>
+                    </>
                   )}
                   {formData.type === 'VISUAL' && (
                     <div className="group">
@@ -675,8 +1085,10 @@ export default function IntelCreatorPanel() {
           </div>
         </div>
       )}
+      </OverlayPortal>
 
       {/* Export Modal */}
+      <OverlayPortal open={showExport} onClose={() => setShowExport(false)}>
       <AnimatePresence>
       {showExport && (
         <div className="fixed inset-0 z-[120] flex justify-end bg-black/80 backdrop-blur-sm" onClick={() => setShowExport(false)}>
@@ -711,6 +1123,7 @@ export default function IntelCreatorPanel() {
         </div>
       )}
       </AnimatePresence>
+      </OverlayPortal>
     </section>
   );
 }

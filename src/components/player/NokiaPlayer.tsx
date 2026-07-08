@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IntelBase, AudioIntel } from '../../services/IntelEngine';
+import { IntelBase, AudioIntel, VideoIntel } from '../../services/IntelEngine';
+import NokiaVideoSurface, { NokiaVideoSurfaceHandle } from './NokiaVideoSurface';
 import { audioEngine } from '../../services/AudioEngine';
 import type { WalkmanStatus, CharacterData, Group } from '../../types/player';
 import { groupService } from '../../services/GroupService';
@@ -54,7 +55,18 @@ const PixelIcon = {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
       <path d="M1 2h12v10H1V2zm2 2v2h8V4H3zm0 4v2h5V8H3z" />
     </svg>
-  )
+  ),
+  VHS: () => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <path d="M1 3h12v8H1V3zm2 1v6h8V4H3zm1,1h2v4H6V5z" />
+    </svg>
+  ),
+  DVD: () => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7" cy="7" r="2" />
+    </svg>
+  ),
 };
 
 interface NokiaPlayerProps {
@@ -81,11 +93,12 @@ interface NokiaPlayerProps {
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   setBackVisible?: (v: boolean) => void;
   activeCharacter?: CharacterData;
+  characterId?: string;
   uid?: string;
   onUpdatePhoneNumber?: (phoneNumber: string) => void;
 }
 
-type FilterTab = 'TODOS' | 'AUDIO' | 'DOCS' | 'SMS';
+type FilterTab = 'TODOS' | 'AUDIO' | 'VIDEO' | 'DOCS' | 'SMS';
 
 // Retro square-wave audio feedback engine
 class NokiaAudioFeedback {
@@ -144,6 +157,13 @@ function generateRandomUSPhoneNumber(): string {
   return `(${areaCode}) ${exchangeCode}-${subscriberNumber}`;
 }
 
+function formatVideoTime(time: number): string {
+  if (isNaN(time) || time < 0) return '00:00';
+  const mins = Math.floor(time / 60);
+  const secs = Math.floor(time % 60);
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export default function NokiaPlayer({
   currentIntel,
   status,
@@ -168,6 +188,7 @@ export default function NokiaPlayer({
   registerBackHandler,
   setBackVisible,
   activeCharacter,
+  characterId: characterIdProp,
   uid,
   onUpdatePhoneNumber,
 }: NokiaPlayerProps) {
@@ -181,17 +202,9 @@ export default function NokiaPlayer({
   const [activeTab, setActiveTab] = useState<FilterTab>(() => {
     return (sessionStorage.getItem('nokia_active_tab') as FilterTab) || 'TODOS';
   });
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
-    return sessionStorage.getItem('nokia_active_group') || null;
-  });
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
     return sessionStorage.getItem('nokia_active_conv') || null;
   });
-
-  useEffect(() => {
-    if (activeGroupId) sessionStorage.setItem('nokia_active_group', activeGroupId);
-    else sessionStorage.removeItem('nokia_active_group');
-  }, [activeGroupId]);
 
   useEffect(() => {
     if (activeConversationId) sessionStorage.setItem('nokia_active_conv', activeConversationId);
@@ -199,22 +212,44 @@ export default function NokiaPlayer({
   }, [activeConversationId]);
 
   const [userGroups, setUserGroups] = useState<Group[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const intelListRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const [readConversationIds, setReadConversationIds] = useState<Set<string>>(() => new Set());
+  const videoSurfaceRef = useRef<NokiaVideoSurfaceHandle | null>(null);
 
-  // Group messages into conversations
+  const markConversationRead = useCallback((contactId: string) => {
+    setReadConversationIds((prev) => {
+      if (prev.has(contactId)) return prev;
+      const next = new Set(prev);
+      next.add(contactId);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeConversationId) {
+      markConversationRead(activeConversationId);
+    }
+  }, [activeConversationId, markConversationRead]);
+
+  const resolvedCharacterId = characterIdProp || activeCharacter?.id;
+
+  // Group messages into conversations (mesma lógica do mobile: inbox unificado de todos os grupos)
   const conversations = useMemo(() => {
-    if (!activeCharacter) return [];
+    if (!activeCharacter || !resolvedCharacterId) return [];
     
     const relevantMessages = groupMessages.filter(
-      msg => !msg.recipientId || msg.recipientId === activeCharacter.id || msg.senderId === activeCharacter.id
+      msg => !msg.recipientId || msg.recipientId === resolvedCharacterId || msg.senderId === resolvedCharacterId
     );
 
     const convMap = new Map<string, {
       contactId: string;
       contactName: string;
       contactNumber: string;
+      groupId: string;
       lastMessage: any;
       messages: any[];
     }>();
@@ -227,27 +262,22 @@ export default function NokiaPlayer({
 
     sortedMessages.forEach(msg => {
       let contactId = '';
-      let contactName = '';
-      let contactNumber = '';
 
-      if (msg.senderId === activeCharacter.id) {
+      if (msg.senderId === resolvedCharacterId) {
         if (!msg.recipientId) return; 
         
         // As of the GroupService fix, player messages now have the NPC correctly set in recipientId
         contactId = msg.recipientId;
-        contactName = msg.recipientName || 'Desconhecido';
-        contactNumber = msg.recipientNumber || '';
       } else {
         contactId = msg.senderId;
-        contactName = msg.senderName;
-        contactNumber = msg.senderNumber || '';
       }
 
       if (!convMap.has(contactId)) {
         convMap.set(contactId, {
           contactId,
-          contactName,
-          contactNumber,
+          contactName: 'DESCONHECIDO',
+          contactNumber: '',
+          groupId: msg._groupId || '',
           lastMessage: msg,
           messages: []
         });
@@ -258,64 +288,81 @@ export default function NokiaPlayer({
       
       if (msg.createdAt && (!conv.lastMessage.createdAt || msg.createdAt.toDate() > conv.lastMessage.createdAt.toDate())) {
         conv.lastMessage = msg;
+        conv.groupId = msg._groupId || conv.groupId;
       }
     });
+
+    for (const conv of convMap.values()) {
+      const receivedMsg = conv.messages.find(m => m.senderId !== resolvedCharacterId);
+      if (receivedMsg) {
+        conv.contactName = receivedMsg.senderName || 'DESCONHECIDO';
+        conv.contactNumber = receivedMsg.senderNumber || '';
+      } else {
+        const msgData = relevantMessages.find(m => m.recipientId === conv.contactId);
+        conv.contactName = msgData?.recipientName || 'DESCONHECIDO';
+        conv.contactNumber = msgData?.recipientNumber || '';
+      }
+    }
 
     return Array.from(convMap.values()).sort((a, b) => {
       const dateA = a.lastMessage.createdAt?.toDate() || new Date(0);
       const dateB = b.lastMessage.createdAt?.toDate() || new Date(0);
       return dateB.getTime() - dateA.getTime();
     });
-  }, [groupMessages, activeCharacter]);
+  }, [groupMessages, activeCharacter, resolvedCharacterId]);
 
   // Subscribe to character's groups
   useEffect(() => {
-    if (!activeCharacter?.id) return;
-    const unsub = groupService.subscribeToGroupsForCharacter(activeCharacter.id, (groups) => {
-      setUserGroups(groups);
-      if (groups.length > 0) {
-        setActiveGroupId(prev => {
-          if (prev && groups.some(g => g.id === prev)) return prev;
-          return groups[0].id;
-        });
-      } else {
-        setActiveGroupId(null);
-      }
-    });
+    if (!resolvedCharacterId) {
+      setUserGroups([]);
+      setGroupsLoaded(false);
+      return;
+    }
+    setGroupsLoaded(false);
+    const unsub = groupService.subscribeToGroupsForCharacter(
+      resolvedCharacterId,
+      (groups) => {
+        setUserGroups(groups);
+        setGroupsLoaded(true);
+      },
+      uid
+    );
     return unsub;
-  }, [activeCharacter?.id]);
+  }, [resolvedCharacterId, uid]);
 
-  // Subscribe to group messages
+  // Subscribe to messages from all groups (paridade com mobile)
   useEffect(() => {
-    if (!activeGroupId) {
+    const groupIds = userGroups.map(g => g.id);
+    if (groupIds.length === 0) {
       setGroupMessages([]);
       return;
     }
-    const unsub = groupService.subscribeToGroupMessages(activeGroupId, (messages) => {
-      setGroupMessages(messages);
-    });
+    const unsub = groupService.subscribeToMessagesForGroups(groupIds, setGroupMessages);
     return unsub;
-  }, [activeGroupId]);
+  }, [userGroups]);
 
-  // Auto-scroll messages list to bottom
+  // Auto-scroll messages list to bottom (scoped to messages container only)
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab !== 'SMS' || !activeConversationId) return;
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
     }
-  }, [groupMessages, activeTab]);
+  }, [groupMessages, activeConversationId, activeTab]);
 
   const handleSendMessage = async () => {
-    if (!newMessageText.trim() || !activeGroupId || !activeCharacter || !activeConversationId) return;
+    if (!newMessageText.trim() || !activeCharacter || !activeConversationId) return;
     try {
       getSfx().playConfirm();
       const text = newMessageText.trim();
       setNewMessageText('');
       
       const activeConv = conversations.find(c => c.contactId === activeConversationId);
+      if (!activeConv?.groupId) return;
       
       await groupService.sendGroupMessage(
-        activeGroupId,
-        activeCharacter.id,
+        activeConv.groupId,
+        resolvedCharacterId,
         activeCharacter.codinome,
         activeCharacter.phoneNumber || '',
         text,
@@ -362,17 +409,35 @@ export default function NokiaPlayer({
   }, [registerBackHandler, status, showVolumeBar, onCancelScan, activeConversationId]);
 
   const audioItems = useMemo(() => intelItems.filter((item) => item.type === 'AUDIO'), [intelItems]);
-  const fileItems = useMemo(() => intelItems.filter((item) => item.type !== 'AUDIO'), [intelItems]);
+  const videoItems = useMemo(() => intelItems.filter((item) => item.type === 'VIDEO'), [intelItems]);
+  const fileItems = useMemo(() => intelItems.filter((item) => item.type !== 'AUDIO' && item.type !== 'VIDEO'), [intelItems]);
 
   const sortedItems = useMemo(() => {
     if (activeTab === 'AUDIO') {
       return [...audioItems, ...(fileItems.length > 0 ? [{ __divider: true, label: 'PISTAS / DOCS' } as any, ...fileItems] : [])];
     }
+    if (activeTab === 'VIDEO') {
+      return videoItems;
+    }
     if (activeTab === 'DOCS') {
       return [...fileItems, ...(audioItems.length > 0 ? [{ __divider: true, label: 'PROVAS / AUDIO' } as any, ...audioItems] : [])];
     }
-    return [...audioItems, ...(fileItems.length > 0 && audioItems.length > 0 ? [{ __divider: true, label: 'PISTAS / DOCS' } as any] : []), ...fileItems];
-  }, [activeTab, audioItems, fileItems]);
+    if (activeTab === 'TODOS') {
+      const parts: any[] = [...audioItems];
+      if (videoItems.length > 0) {
+        if (parts.length > 0) parts.push({ __divider: true, label: 'VÍDEOS' });
+        parts.push(...videoItems);
+      }
+      if (fileItems.length > 0) {
+        if (parts.length > 0) parts.push({ __divider: true, label: 'PISTAS / DOCS' });
+        parts.push(...fileItems);
+      }
+      return parts;
+    }
+    return [...audioItems, ...videoItems, ...fileItems];
+  }, [activeTab, audioItems, videoItems, fileItems]);
+
+  const isVideoIntel = currentIntel instanceof VideoIntel;
 
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
@@ -384,8 +449,12 @@ export default function NokiaPlayer({
       // Throttle to ~4 updates/sec (250ms) to avoid excessive re-renders
       if (timestamp - lastUpdateRef.current >= 250) {
         lastUpdateRef.current = timestamp;
-        const current = audioEngine.getCurrentTime();
-        const duration = audioEngine.getDuration();
+        const current = isVideoIntel && videoSurfaceRef.current
+          ? videoSurfaceRef.current.getCurrentTime()
+          : audioEngine.getCurrentTime();
+        const duration = isVideoIntel && videoSurfaceRef.current
+          ? videoSurfaceRef.current.getDuration()
+          : audioEngine.getDuration();
         setAudioProgress(current);
         setAudioDuration(duration);
 
@@ -416,7 +485,7 @@ export default function NokiaPlayer({
         rafRef.current = null;
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, isVideoIntel]);
 
   const handleItemTap = (item: IntelBase) => {
     getSfx().playConfirm();
@@ -425,7 +494,7 @@ export default function NokiaPlayer({
 
   const handlePlayToggle = () => {
     getSfx().playConfirm();
-    if (currentIntel?.type === 'AUDIO') {
+    if (currentIntel?.type === 'AUDIO' || currentIntel?.type === 'VIDEO') {
       setIsPlaying(!isPlaying);
     }
   };
@@ -435,7 +504,10 @@ export default function NokiaPlayer({
       onRewind();
     } else {
       getSfx().playBeep();
-      if (currentIntel) {
+      if (currentIntel instanceof VideoIntel && videoSurfaceRef.current) {
+        videoSurfaceRef.current.rewind();
+        setIsPlaying(true);
+      } else if (currentIntel) {
         audioEngine.stop();
         setTimeout(() => {
           audioEngine.play().catch(() => {});
@@ -471,6 +543,8 @@ export default function NokiaPlayer({
     getSfx().playBeep();
     setActiveTab(tab);
     sessionStorage.setItem('nokia_active_tab', tab);
+    if (intelListRef.current) intelListRef.current.scrollTop = 0;
+    if (messagesContainerRef.current) messagesContainerRef.current.scrollTop = 0;
   };
 
   const isScanning = status === 'SCANNING';
@@ -479,6 +553,7 @@ export default function NokiaPlayer({
   const tabs: { key: FilterTab; label: string; icon: React.ReactNode }[] = [
     { key: 'TODOS', label: 'TUDO', icon: <span>[*]</span> },
     { key: 'AUDIO', label: 'AUD', icon: <PixelIcon.Audio /> },
+    { key: 'VIDEO', label: 'VID', icon: <PixelIcon.VHS /> },
     { key: 'DOCS', label: 'DOC', icon: <PixelIcon.Doc /> },
     { key: 'SMS', label: 'SMS', icon: <PixelIcon.SMS /> },
   ];
@@ -550,31 +625,67 @@ export default function NokiaPlayer({
                         {currentIntel.title}
                       </div>
                       <div className="text-[9px] font-bold opacity-70 uppercase truncate">
-                        {currentIntel instanceof AudioIntel ? currentIntel.metadata.artist : currentIntel.metadata?.npc}
+                        {currentIntel instanceof AudioIntel
+                          ? currentIntel.metadata.artist
+                          : currentIntel instanceof VideoIntel
+                            ? `${currentIntel.format} · ${currentIntel.metadata?.npc || 'ARQUIVO'}`
+                            : currentIntel.metadata?.npc}
                       </div>
                     </div>
 
-                    {/* Pixel Cassette */}
-                    <div className="flex justify-center mb-2">
-                      <div className="w-28 h-12 bg-[#edfeed] border-2 border-[#111e14] relative flex items-center justify-around px-4">
-                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-2 border-b-2 border-[#111e14]" />
-                        {[0, 1].map((ri) => (
-                          <div
-                            key={ri}
-                            className="w-6 h-6 border-2 border-[#111e14] flex items-center justify-center relative bg-white/20"
-                          >
+                    {isVideoIntel && currentIntel instanceof VideoIntel ? (
+                      <>
+                        <div className="relative mb-2 border-2 border-[#111e14] aspect-video overflow-hidden shadow-[2px_2px_0px_#111e14]">
+                          <NokiaVideoSurface
+                            ref={videoSurfaceRef}
+                            intel={currentIntel}
+                            isPlaying={isPlaying}
+                            volume={volume}
+                            onEnded={() => setIsPlaying(false)}
+                          />
+                        </div>
+                        <div className="flex justify-center mb-2">
+                          {currentIntel.format === 'DVD' ? (
+                            <div className="w-16 h-16 rounded-full border-2 border-[#111e14] flex items-center justify-center relative bg-[#edfeed] shadow-[2px_2px_0px_#111e14]">
+                              <div className="w-5 h-5 rounded-full border-2 border-[#111e14] bg-[#111e14]/10" />
+                              <div className={`absolute inset-1 rounded-full border border-dashed border-[#111e14]/30 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
+                            </div>
+                          ) : (
+                            <div className="w-24 h-14 bg-[#edfeed] border-2 border-[#111e14] relative flex items-center justify-around px-3 shadow-[2px_2px_0px_#111e14]">
+                              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-2 border-b-2 border-[#111e14]" />
+                              {[0, 1].map((ri) => (
+                                <div key={ri} className="w-5 h-5 border-2 border-[#111e14] flex items-center justify-center relative">
+                                  <div className={`w-full h-0.5 bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }} />
+                                  <div className={`w-0.5 h-full bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }} />
+                                </div>
+                              ))}
+                              <span className="absolute bottom-0.5 right-1 text-[7px] font-black">VHS</span>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-center mb-2">
+                        <div className="w-28 h-12 bg-[#edfeed] border-2 border-[#111e14] relative flex items-center justify-around px-4">
+                          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-2 border-b-2 border-[#111e14]" />
+                          {[0, 1].map((ri) => (
                             <div
-                              className={`w-full h-0.5 bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`}
-                              style={{ animationDuration: '4s' }}
-                            />
-                            <div
-                              className={`w-0.5 h-full bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`}
-                              style={{ animationDuration: '4s' }}
-                            />
-                          </div>
-                        ))}
+                              key={ri}
+                              className="w-6 h-6 border-2 border-[#111e14] flex items-center justify-center relative bg-white/20"
+                            >
+                              <div
+                                className={`w-full h-0.5 bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`}
+                                style={{ animationDuration: '4s' }}
+                              />
+                              <div
+                                className={`w-0.5 h-full bg-[#111e14] absolute ${isPlaying ? 'animate-spin' : ''}`}
+                                style={{ animationDuration: '4s' }}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Progress */}
                     <div className="mb-2">
@@ -662,7 +773,7 @@ export default function NokiaPlayer({
             </div>
 
             {/* ─── UNIFIED INTEL LIST ─── */}
-            <div className="flex-grow overflow-y-auto min-h-0 px-0.5 custom-nokia-scrollbar" style={{ scrollbarWidth: 'none' }}>
+            <div ref={intelListRef} className="flex-grow overflow-y-auto min-h-0 px-0.5 custom-nokia-scrollbar" style={{ scrollbarWidth: 'none' }}>
               {activeTab === 'SMS' ? (
                 <div className="flex flex-col flex-grow min-h-0 h-full">
                   {!activeCharacter?.phoneNumber ? (
@@ -682,6 +793,11 @@ export default function NokiaPlayer({
                         [GERAR NÚMERO]
                       </button>
                     </div>
+                  ) : !groupsLoaded ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center opacity-40 gap-2">
+                      <PixelIcon.SMS />
+                      <span className="font-black text-[9px] uppercase">SINCRONIZANDO GRUPOS...</span>
+                    </div>
                   ) : userGroups.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center opacity-40 gap-2">
                       <PixelIcon.SMS />
@@ -690,29 +806,16 @@ export default function NokiaPlayer({
                     </div>
                   ) : (
                     <div className="flex flex-col flex-grow min-h-0 h-full">
-                      {/* Active Group info & selector if multiple */}
                       <div className="flex justify-between items-center bg-[#111e14]/5 border-b border-[#111e14]/20 p-1.5 text-[9px] font-black shrink-0 mb-1.5">
                         <div className="flex items-center gap-1">
                           <span className="opacity-60">DE:</span>
                           <span className="font-mono">{activeCharacter.phoneNumber}</span>
                         </div>
-                        {userGroups.length > 1 && !activeConversationId ? (
-                          <select
-                            value={activeGroupId || ''}
-                            onChange={(e) => {
-                              getSfx().playBeep();
-                              setActiveGroupId(e.target.value);
-                              setActiveConversationId(null);
-                            }}
-                            className="bg-[#edfeed] border border-[#111e14] text-[8px] p-0.5 font-bold uppercase focus:outline-none"
-                          >
-                            {userGroups.map(g => (
-                              <option key={g.id} value={g.id}>{g.name}</option>
-                            ))}
-                          </select>
-                        ) : !activeConversationId ? (
-                          <span className="truncate max-w-[120px] uppercase font-bold">{userGroups[0].name}</span>
-                        ) : null}
+                        {!activeConversationId && userGroups.length > 0 && (
+                          <span className="truncate max-w-[140px] uppercase font-bold opacity-60">
+                            {userGroups.length === 1 ? userGroups[0].name : `${userGroups.length} GRUPOS`}
+                          </span>
+                        )}
                       </div>
 
                       {!activeConversationId ? (
@@ -727,16 +830,22 @@ export default function NokiaPlayer({
                                 key={conv.contactId}
                                 onClick={() => {
                                   getSfx().playConfirm();
+                                  markConversationRead(conv.contactId);
                                   setActiveConversationId(conv.contactId);
                                 }}
                                 className="w-full text-left flex flex-col p-2 border-2 border-[#111e14] bg-[#edfeed] hover:bg-[#111e14]/5 active:scale-[0.98] transition-all shadow-[1px_1px_0px_#111e14]"
                               >
                                 <div className="flex justify-between items-center text-[9px] font-black uppercase mb-1">
-                                  <span>{conv.contactName}</span>
+                                  <span className="flex items-center gap-1.5 min-w-0">
+                                    {!readConversationIds.has(conv.contactId) && (
+                                      <span className="w-2 h-2 bg-[#111e14] shrink-0" aria-hidden />
+                                    )}
+                                    <span className="truncate">{conv.contactName}</span>
+                                  </span>
                                   <span className="opacity-50 font-mono text-[8px]">{dateStr}</span>
                                 </div>
                                 <div className="text-[10px] font-bold opacity-80 truncate uppercase tracking-tighter">
-                                  {conv.lastMessage.senderId === activeCharacter.id ? 'VOCÊ: ' : ''}{conv.lastMessage.text}
+                                  {conv.lastMessage.senderId === resolvedCharacterId ? 'VOCÊ: ' : ''}{conv.lastMessage.text}
                                 </div>
                               </button>
                             );
@@ -767,7 +876,7 @@ export default function NokiaPlayer({
                           </div>
 
                           {/* Messages list */}
-                          <div className="flex-grow overflow-y-auto min-h-0 px-0.5 space-y-2 custom-nokia-scrollbar">
+                          <div ref={messagesContainerRef} className="flex-grow overflow-y-auto min-h-0 px-0.5 space-y-2 custom-nokia-scrollbar">
                             {(() => {
                               const activeConv = conversations.find(c => c.contactId === activeConversationId);
                               if (!activeConv) return null;
@@ -780,7 +889,7 @@ export default function NokiaPlayer({
                               });
 
                               return chatMsgs.map((msg) => {
-                                const isMe = msg.senderId === activeCharacter.id;
+                                const isMe = msg.senderId === resolvedCharacterId;
                                 const dateStr = msg.createdAt?.toDate 
                                   ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                   : 'Agora';
@@ -804,7 +913,6 @@ export default function NokiaPlayer({
                                 );
                               });
                             })()}
-                            <div ref={messagesEndRef} />
                           </div>
 
                           {/* Composer input */}
@@ -856,7 +964,9 @@ export default function NokiaPlayer({
                     }
 
                     const isAudio = item.type === 'AUDIO';
+                    const isVideo = item.type === 'VIDEO';
                     const isCurrent = item.id === currentIntelId;
+                    const videoFormat = isVideo && item instanceof VideoIntel ? item.format : null;
 
                     return (
                       <div
@@ -869,9 +979,14 @@ export default function NokiaPlayer({
                         }`}
                       >
                         <div className="shrink-0 scale-90">
-                          {isAudio ? <PixelIcon.Audio /> : <PixelIcon.Doc />}
+                          {isAudio ? <PixelIcon.Audio /> : isVideo ? (videoFormat === 'DVD' ? <PixelIcon.DVD /> : <PixelIcon.VHS />) : <PixelIcon.Doc />}
                         </div>
-                        <span className="truncate uppercase tracking-tight">{item.title}</span>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="truncate uppercase tracking-tight">{item.title}</span>
+                          {isVideo && videoFormat && (
+                            <span className="text-[8px] opacity-60 uppercase tracking-widest">{videoFormat}</span>
+                          )}
+                        </div>
                         {isCurrent && (
                           <div className="ml-auto shrink-0 flex items-center gap-1">
                             {isPlaying ? (

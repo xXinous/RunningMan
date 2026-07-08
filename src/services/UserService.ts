@@ -17,8 +17,6 @@ import {
   orderBy,
   startAfter
 } from "firebase/firestore";
-import { initializeApp, deleteApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { MasterAccount, CharacterData, PlayerStats } from "../types/player";
 
 export interface PlayCountData {
@@ -52,31 +50,56 @@ export class UserService {
 
   /**
    * Fetches a single page of users with optional filtering and pagination.
+   * Usa leitura completa + ordenação no cliente para paginação estável.
    */
   public async fetchUsersPage(pageSize: number, lastDoc: any = null, searchField: string = '', searchQuery: string = ''): Promise<{ users: MasterAccount[], lastVisible: any }> {
-    let q = query(collection(db, "users"), orderBy("createdAt", "desc"), limit(pageSize));
+    const sortByCreatedAt = (users: MasterAccount[]) =>
+      [...users].sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
 
     if (searchQuery && searchField) {
-      // Basic prefix search for Firestore
-      const searchEnd = searchQuery + '\uf8ff';
-      q = query(
-        collection(db, "users"), 
-        where(searchField, ">=", searchQuery), 
-        where(searchField, "<=", searchEnd),
-        orderBy(searchField),
-        limit(pageSize)
-      );
+      try {
+        const searchEnd = searchQuery + '\uf8ff';
+        let q = query(
+          collection(db, 'users'),
+          where(searchField, '>=', searchQuery),
+          where(searchField, '<=', searchEnd),
+          orderBy(searchField),
+          limit(pageSize),
+        );
+
+        if (lastDoc) {
+          q = query(q, startAfter(lastDoc));
+        }
+
+        const snapshot = await getDocs(q);
+        const users = snapshot.docs.map((docSnap) => ({ uid: docSnap.id, ...docSnap.data() } as MasterAccount));
+        const lastVisible = snapshot.docs[snapshot.docs.length - 1];
+        return { users, lastVisible };
+      } catch (err) {
+        console.warn('[UserService] prefix search failed, falling back to client filter:', err);
+      }
+    }
+
+    const snapshot = await getDocs(collection(db, 'users'));
+    let users = sortByCreatedAt(snapshot.docs.map((docSnap) => ({ uid: docSnap.id, ...docSnap.data() } as MasterAccount)));
+
+    if (searchQuery && searchField) {
+      const q = searchQuery.toLowerCase();
+      users = users.filter((user) => {
+        const value = (user as unknown as Record<string, unknown>)[searchField];
+        return String(value ?? '').toLowerCase().includes(q);
+      });
     }
 
     if (lastDoc) {
-      q = query(q, startAfter(lastDoc));
+      const lastUid = lastDoc.id ?? lastDoc.data?.()?.uid;
+      const startIdx = users.findIndex((user) => user.uid === lastUid);
+      users = startIdx >= 0 ? users.slice(startIdx + 1) : users;
     }
 
-    const snapshot = await getDocs(q);
-    const users = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as MasterAccount));
-    const lastVisible = snapshot.docs[snapshot.docs.length - 1];
-
-    return { users, lastVisible };
+    const page = users.slice(0, pageSize);
+    const lastVisible = page.length > 0 ? snapshot.docs.find((docSnap) => docSnap.id === page[page.length - 1].uid) ?? null : null;
+    return { users: page, lastVisible };
   }
 
   public subscribeToAllCharacters(callback: (characters: {uid: string, char: CharacterData}[]) => void): () => void {
@@ -254,46 +277,18 @@ export class UserService {
     await deleteDoc(doc(db, "users", uid, "characters", characterId, "achievements", achievementId));
   }
 
-  public async createSyntheticUser(masterId: string, rawPassword: string, role: 'player' | 'admin'): Promise<{ uid: string; characterId: string }> {
-    const secondaryApp = initializeApp(
-      {
-        apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-        storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-        messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-        appId: import.meta.env.VITE_FIREBASE_APP_ID,
-      },
-      "secondaryApp_" + Date.now()
-    );
-
-    const secondaryAuth = getAuth(secondaryApp);
-    const slug = masterId.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_");
-    const email = `${slug}@limboos.local`;
-
-    const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, email, rawPassword);
-    
-    // Create Master Account
-    await setDoc(doc(db, "users", newUser.uid), {
-      uid: newUser.uid,
-      email: email,
-      role: role,
-      createdAt: serverTimestamp(),
-      lastLogin: serverTimestamp(),
-    });
-
-    // Create Initial Character
-    const charId = `initial_${Date.now()}`;
-    await setDoc(doc(db, "users", newUser.uid, "characters", charId), {
-      codinome: masterId.trim(),
-      agentStatus: 'vivo',
-      dangerLevel: 1,
-      createdAt: serverTimestamp(),
-    });
-
-    await secondaryAuth.signOut();
-    await deleteApp(secondaryApp);
-    return { uid: newUser.uid, characterId: charId };
+  public async adminCreateUser(masterId: string, rawPassword: string, role: 'player' | 'admin'): Promise<{ uid: string; characterId: string }> {
+    const { getFunctions } = await import('firebase/functions');
+    const { httpsCallable } = await import('firebase/functions');
+    const { getApp } = await import('firebase/app');
+    const functions = getFunctions(getApp(), 'southamerica-east1');
+    const fn = httpsCallable(functions, 'adminCreateUser');
+    const result = await fn({ masterId, password: rawPassword, role });
+    const data = result.data as { success?: boolean; uid?: string; characterId?: string };
+    if (!data.success || !data.uid || !data.characterId) {
+      throw new Error('Falha ao criar usuário.');
+    }
+    return { uid: data.uid, characterId: data.characterId };
   }
 
   public async resetUserPassword(targetUid: string, newPassword: string): Promise<void> {

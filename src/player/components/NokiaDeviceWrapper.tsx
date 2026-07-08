@@ -78,7 +78,7 @@ export default function NokiaDeviceWrapper({
             </div>
           )}
 
-          <div className="flex-grow overflow-y-auto relative p-2 flex flex-col min-h-0 custom-nokia-scrollbar">
+          <div className="flex-grow overflow-hidden relative p-2 flex flex-col min-h-0">
             {children}
           </div>
 

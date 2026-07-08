@@ -88,12 +88,22 @@ export class AdminAnalyticsService {
         },
         (err) => console.warn('[AdminAnalyticsService] users listener error:', err)
       ),
-      onSnapshot(collection(db, "audios"), 
+      onSnapshot(collection(db, "mediaAssets"),
         (snap) => {
-          audios = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+          audios = snap.docs
+            .filter((d) => (d.data() as { type?: string }).type === 'audio')
+            .map((d) => {
+              const data = d.data() as { size?: number; originalName?: string; metadata?: { title?: string } };
+              return {
+                id: d.id,
+                size: data.size ?? 0,
+                originalName: data.originalName,
+                title: data.metadata?.title,
+              };
+            });
           notify();
         },
-        (err) => console.warn('[AdminAnalyticsService] audios listener error:', err)
+        (err) => console.warn('[AdminAnalyticsService] mediaAssets listener error:', err)
       ),
       onSnapshot(collectionGroup(db, "achievements"), 
         (snap) => {
