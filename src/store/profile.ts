@@ -9,9 +9,9 @@ import {
   signInWithPopup,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { loadMasterAccount, updateLastLogin, waitForUserDoc } from './firestore';
+import { updateLastLogin, waitForUserDoc } from './firestore';
 import type { MasterAccount } from '../types/player';
 
 function masterIdToEmail(masterId: string): string {
@@ -41,19 +41,41 @@ async function callProvisionUserProfile(): Promise<void> {
 }
 
 /**
+ * Monta MasterAccount a partir de um snapshot já carregado (evita 2º getDoc).
+ */
+function masterAccountFromData(uid: string, data: Record<string, unknown>): MasterAccount {
+  return {
+    uid,
+    email: (data?.email as string) || '',
+    masterName: (data?.masterName as string) || (data?.displayName as string) || 'Agente',
+    role: (data?.role as MasterAccount['role']) || 'player',
+    createdAt: data?.createdAt || null,
+    ...data,
+  } as MasterAccount;
+}
+
+let _ensureInflight: Promise<MasterAccount> | null = null;
+let _ensureInflightUid: string | null = null;
+
+/**
  * Garante users/{uid} para a sessão Auth atual.
  * 1. Fast path se o perfil já existe
  * 2. Aguarda onAuthUserCreated em contas novas
  * 3. Fallback via Cloud Function para contas Auth órfãs (login sem doc Firestore)
  */
-export async function ensureUserProfile(user: User): Promise<MasterAccount> {
-  await user.getIdToken(true);
+async function ensureUserProfileOnce(user: User): Promise<MasterAccount> {
+  // Token da sessão Auth já basta para Firestore — force-refresh só atrasa o login.
+  await user.getIdToken();
 
   const userRef = doc(db, 'users', user.uid);
   let snap = await getDoc(userRef);
   if (snap.exists()) {
-    await updateLastLogin(user.uid);
-    return loadMasterAccount(user.uid);
+    // Persiste lastLogin em background; o objeto em memória reflete o acesso atual.
+    void updateLastLogin(user.uid);
+    return {
+      ...masterAccountFromData(user.uid, snap.data() as Record<string, unknown>),
+      lastLogin: Timestamp.now(),
+    };
   }
 
   try {
@@ -71,8 +93,23 @@ export async function ensureUserProfile(user: User): Promise<MasterAccount> {
     throw new Error(PROFILE_NOT_FOUND_MESSAGE);
   }
 
-  await updateLastLogin(user.uid);
-  return loadMasterAccount(user.uid);
+  void updateLastLogin(user.uid);
+  return {
+    ...masterAccountFromData(user.uid, snap.data() as Record<string, unknown>),
+    lastLogin: Timestamp.now(),
+  };
+}
+
+export async function ensureUserProfile(user: User): Promise<MasterAccount> {
+  if (_ensureInflight && _ensureInflightUid === user.uid) {
+    return _ensureInflight;
+  }
+  _ensureInflightUid = user.uid;
+  _ensureInflight = ensureUserProfileOnce(user).finally(() => {
+    _ensureInflight = null;
+    _ensureInflightUid = null;
+  });
+  return _ensureInflight;
 }
 
 async function rollbackAuthOnProfileFailure(user: User | null): Promise<void> {

@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import RetroLoading from '../../components/player/RetroLoading';
 import WalkmanShell from './WalkmanShell';
 import MiniAppsOverlay from './MiniAppsOverlay';
+import LoginScreen from '../../components/LoginScreen';
 
-const LoginScreen = React.lazy(() => import('../../components/LoginScreen'));
 const CharacterSelectionScreen = React.lazy(() => import('../../components/CharacterSelectionScreen'));
 const ProfileScreen = React.lazy(() => import('../../components/ProfileScreen'));
 const AgentDossierOverlay = React.lazy(() =>
@@ -46,9 +46,7 @@ export default function PlayerScreenRouter() {
           transition={{ duration: 0.15 }}
           className="w-full h-full flex items-center justify-center"
         >
-          <React.Suspense fallback={<RetroLoading message="CARREGANDO LOGIN..." />}>
-            <LoginScreen onLogin={handleLogin} />
-          </React.Suspense>
+          <LoginScreen onLogin={handleLogin} />
         </motion.div>
       ) : screen === 'characterSelection' && masterAccount ? (
         <motion.div
