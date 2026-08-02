@@ -9,6 +9,7 @@ import { collection, onSnapshot, Timestamp } from 'firebase/firestore';
 import { useModal } from './ConfirmModal';
 import IntelDistributionDrawer from './IntelDistributionDrawer';
 import NpcSmsDistributionModal from './NpcSmsDistributionModal';
+import { campaignLabel, masterAccountLabel, masterAccountLabelByUid } from '../lib/entityLabels';
 
 interface GroupManagerProps {
   isAdmin: boolean;
@@ -342,7 +343,7 @@ export default function GroupManager({ isAdmin, onNavigateToMission }: GroupMana
                                 {item.char.codinome}
                               </p>
                               <p className="text-[7px] font-mono text-zinc-600 font-bold uppercase truncate mt-0.5">
-                                {user?.displayName || user?.email?.split('@')[0]}
+                                {masterAccountLabel(user, '?')}
                               </p>
                             </div>
                           </div>
@@ -407,7 +408,7 @@ export default function GroupManager({ isAdmin, onNavigateToMission }: GroupMana
                                 {item.char.codinome}
                               </p>
                               <p className="text-[7px] font-mono text-zinc-600 font-bold uppercase truncate mt-0.5">
-                                JOGADOR: {user?.displayName || user?.email?.split('@')[0]}
+                                JOGADOR: {masterAccountLabel(user, '?')}
                               </p>
                             </div>
                           </div>
@@ -469,7 +470,7 @@ export default function GroupManager({ isAdmin, onNavigateToMission }: GroupMana
                       {group.campaignId && (
                         <span className="text-[8px] font-black bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-1 rounded-sm uppercase tracking-widest flex items-center gap-1">
                           <span className="material-symbols-outlined text-[10px]">rocket_launch</span>
-                          {campaigns.find(c => c.id === group.campaignId)?.name || group.campaignId}
+                          {campaignLabel(group.campaignId, campaigns)}
                         </span>
                       )}
                       {group.unlockedCampaigns && group.unlockedCampaigns.length > 0 && (
@@ -526,7 +527,7 @@ export default function GroupManager({ isAdmin, onNavigateToMission }: GroupMana
                            <div className={`w-2 h-2 rounded-full ${item.char.agentStatus === 'vivo' ? 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]' : item.char.agentStatus === 'morto' ? 'bg-red-500' : 'bg-yellow-500'}`} />
                            <div className="min-w-0 flex-1">
                              <p className="font-black text-[9px] text-zinc-300 uppercase truncate pr-4">{item.char.codinome}</p>
-                             <p className="font-mono text-[8px] text-zinc-600 truncate">{users.find(u => u.uid === slot.uid)?.displayName || '???'}</p>
+                             <p className="font-mono text-[8px] text-zinc-600 truncate">{masterAccountLabelByUid(slot.uid, users, '???')}</p>
                            </div>
                            <button onClick={() => handleQuickRemoveMember(group.id, item.char.id, item.char.codinome)} className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-sm opacity-0 group-hover/member:opacity-100 transition-all bg-black/80 backdrop-blur-sm z-10">
                              <span className="material-symbols-outlined text-[14px]">close</span>
@@ -565,7 +566,7 @@ export default function GroupManager({ isAdmin, onNavigateToMission }: GroupMana
                                  <div className={`w-2 h-2 rounded-full ${c.char.agentStatus === 'vivo' ? 'bg-emerald-500' : c.char.agentStatus === 'morto' ? 'bg-red-500' : 'bg-yellow-500'}`} />
                                  <div className="flex flex-col">
                                    <span className="text-[10px] font-black text-white uppercase">{c.char.codinome}</span>
-                                   <span className="text-[8px] font-mono text-zinc-600 uppercase">{users.find(u => u.uid === c.uid)?.displayName || '???'}</span>
+                                   <span className="text-[8px] font-mono text-zinc-600 uppercase">{masterAccountLabelByUid(c.uid, users, '???')}</span>
                                  </div>
                                </div>
                                <button onClick={() => handleQuickAddMember(group.id, c.uid, c.char.id, c.char.codinome)} className="text-[9px] font-black bg-primary/10 text-primary px-3 py-1.5 rounded-sm uppercase hover:bg-primary hover:text-black transition-all opacity-0 group-hover/add:opacity-100">Adicionar</button>

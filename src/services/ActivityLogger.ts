@@ -1,5 +1,5 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import type { Firestore } from 'firebase/firestore';
 
 export type ActivityType = 'navigation' | 'action' | 'system' | 'error' | 'admin' | 'auth' | 'trace';
 
@@ -44,6 +44,18 @@ class ActivityLogger {
     this.currentUid = null;
     this.currentUsername = null;
     this.currentCharacterId = null;
+  }
+
+  private asMetadataRecord(value: unknown): Record<string, unknown> {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return {};
+  }
+
+  private async resolveDb(): Promise<Firestore> {
+    const { db } = await import('../lib/firebase');
+    return db;
   }
 
   private sanitizeData(obj: unknown): unknown {
@@ -122,12 +134,12 @@ class ActivityLogger {
       // Signature: (path, metadata?)
       category = 'navigation';
       message = args[0] || '';
-      metadata = args[1] || {};
+      metadata = this.asMetadataRecord(args[1]);
     } else {
       // Signature: (category, message, metadata?)
       category = args[0] || 'general';
       message = args[1] || '';
-      metadata = args[2] || {};
+      metadata = this.asMetadataRecord(args[2]);
     }
 
     return {
@@ -158,6 +170,7 @@ class ActivityLogger {
         source
       }) as Record<string, unknown>;
 
+      const db = await this.resolveDb();
       await addDoc(collection(db, 'activityLog'), {
         ...cleanEvent,
         timestamp: serverTimestamp(),

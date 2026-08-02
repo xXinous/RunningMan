@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { IntelBase, AudioIntel, VideoIntel } from '../../services/IntelEngine';
 import NokiaVideoSurface, { NokiaVideoSurfaceHandle } from './NokiaVideoSurface';
 import { audioEngine } from '../../services/AudioEngine';
+import { useLandscapeLayout } from '../../player/hooks/useLandscapeLayout';
 import type { WalkmanStatus, CharacterData, Group } from '../../types/player';
 import { groupService } from '../../services/GroupService';
 
@@ -79,7 +80,8 @@ interface NokiaPlayerProps {
   intelItems: IntelBase[];
   currentIntelId: string | null;
   onIntelSelect: (intel: IntelBase) => void;
-  onRewind?: () => void;
+  onRewind: () => void;
+  onVideoEnded: () => void;
   onEject: () => void;
   onScanClick: () => void;
   onCancelScan: () => void;
@@ -157,13 +159,6 @@ function generateRandomUSPhoneNumber(): string {
   return `(${areaCode}) ${exchangeCode}-${subscriberNumber}`;
 }
 
-function formatVideoTime(time: number): string {
-  if (isNaN(time) || time < 0) return '00:00';
-  const mins = Math.floor(time / 60);
-  const secs = Math.floor(time % 60);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
 export default function NokiaPlayer({
   currentIntel,
   status,
@@ -175,6 +170,7 @@ export default function NokiaPlayer({
   currentIntelId,
   onIntelSelect,
   onRewind,
+  onVideoEnded,
   onEject,
   onScanClick,
   onCancelScan,
@@ -192,6 +188,7 @@ export default function NokiaPlayer({
   uid,
   onUpdatePhoneNumber,
 }: NokiaPlayerProps) {
+  const { isLandscape } = useLandscapeLayout();
   const [audioProgress, setAudioProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [currentTimeStr, setCurrentTimeStr] = useState('00:00');
@@ -217,6 +214,8 @@ export default function NokiaPlayer({
   const [newMessageText, setNewMessageText] = useState('');
   const intelListRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const STICK_THRESHOLD = 80;
   const [readConversationIds, setReadConversationIds] = useState<Set<string>>(() => new Set());
   const videoSurfaceRef = useRef<NokiaVideoSurfaceHandle | null>(null);
 
@@ -341,14 +340,48 @@ export default function NokiaPlayer({
     return unsub;
   }, [userGroups]);
 
-  // Auto-scroll messages list to bottom (scoped to messages container only)
+  const scrollMessagesToBottom = useCallback((force = false) => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (force || shouldStickToBottomRef.current) {
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < STICK_THRESHOLD;
+  }, []);
+
+  // Auto-scroll messages only when user is already near the bottom
   useEffect(() => {
     if (activeTab !== 'SMS' || !activeConversationId) return;
-    const container = messagesContainerRef.current;
-    if (container) {
-      container.scrollTop = container.scrollHeight;
+    scrollMessagesToBottom();
+  }, [groupMessages, activeConversationId, activeTab, scrollMessagesToBottom]);
+
+  // Stick to bottom when opening a conversation
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    if (activeTab === 'SMS' && activeConversationId) {
+      scrollMessagesToBottom(true);
     }
-  }, [groupMessages, activeConversationId, activeTab]);
+  }, [activeConversationId, activeTab, scrollMessagesToBottom]);
+
+  // Keep scroll at bottom when virtual keyboard resizes the viewport
+  useEffect(() => {
+    if (activeTab !== 'SMS' || !activeConversationId) return;
+    const onViewportResize = () => {
+      if (shouldStickToBottomRef.current) {
+        scrollMessagesToBottom(true);
+      }
+    };
+    window.visualViewport?.addEventListener('resize', onViewportResize);
+    return () => window.visualViewport?.removeEventListener('resize', onViewportResize);
+  }, [activeTab, activeConversationId, scrollMessagesToBottom]);
 
   const handleSendMessage = async () => {
     if (!newMessageText.trim() || !activeCharacter || !activeConversationId) return;
@@ -356,6 +389,7 @@ export default function NokiaPlayer({
       getSfx().playConfirm();
       const text = newMessageText.trim();
       setNewMessageText('');
+      shouldStickToBottomRef.current = true;
       
       const activeConv = conversations.find(c => c.contactId === activeConversationId);
       if (!activeConv?.groupId) return;
@@ -499,21 +533,14 @@ export default function NokiaPlayer({
     }
   };
 
-  const handleRewindLocal = () => {
-    if (onRewind) {
-      onRewind();
-    } else {
-      getSfx().playBeep();
-      if (currentIntel instanceof VideoIntel && videoSurfaceRef.current) {
-        videoSurfaceRef.current.rewind();
-        setIsPlaying(true);
-      } else if (currentIntel) {
-        audioEngine.stop();
-        setTimeout(() => {
-          audioEngine.play().catch(() => {});
-        }, 1000);
-      }
+  const handleRewindTap = () => {
+    getSfx().playBeep();
+    // O surface de vídeo vive no shell, então o reposicionamento é local,
+    // mas status e telemetria passam sempre pelo motor (onRewind).
+    if (currentIntel instanceof VideoIntel && videoSurfaceRef.current) {
+      videoSurfaceRef.current.rewind();
     }
+    onRewind();
   };
 
   const handleEject = () => {
@@ -557,6 +584,8 @@ export default function NokiaPlayer({
     { key: 'DOCS', label: 'DOC', icon: <PixelIcon.Doc /> },
     { key: 'SMS', label: 'SMS', icon: <PixelIcon.SMS /> },
   ];
+
+  const showSystemsMenu = hasTerminalAccess || hasMacAccess;
 
   return (
     <div className="w-full h-full flex flex-col justify-between overflow-hidden relative select-none">
@@ -608,8 +637,81 @@ export default function NokiaPlayer({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col h-full bg-[#edfeed] p-1 px-2 flex-grow min-h-0">
+          <div
+            className={`bg-[#edfeed] p-1 px-2 flex-grow min-h-0 ${
+              isLandscape ? 'landscape-split gap-2 h-full' : 'flex flex-col h-full'
+            }`}
+          >
+            {isLandscape && (
+              <div className="w-[40%] shrink-0 min-h-0 flex flex-col overflow-hidden">
+                {showSystemsMenu && (
+                  <div className="flex gap-1 mb-1 shrink-0">
+                    {hasTerminalAccess && onTerminalOpen && (
+                      <button
+                        onClick={onTerminalOpen}
+                        className="flex-1 py-1 border-2 border-[#111e14] text-[8px] font-black uppercase active:bg-[#111e14] active:text-[#edfeed]"
+                      >
+                        MH-DOS
+                      </button>
+                    )}
+                    {hasMacAccess && onMacOpen && (
+                      <button
+                        onClick={onMacOpen}
+                        className="flex-1 py-1 border-2 border-[#111e14] text-[8px] font-black uppercase active:bg-[#111e14] active:text-[#edfeed]"
+                      >
+                        MACOS
+                      </button>
+                    )}
+                  </div>
+                )}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    {hasActiveIntel && currentIntel ? (
+                      <motion.div
+                        key="player-inline-landscape"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="border-2 border-[#111e14] p-1.5 bg-[#edfeed] shadow-[2px_2px_0px_#111e14] h-full flex flex-col min-h-0 nokia-scroll-area"
+                      >
+                        <div className="text-center mb-1 shrink-0">
+                          <div className="text-[11px] font-black uppercase truncate leading-none mb-0.5">
+                            {currentIntel.title}
+                          </div>
+                        </div>
+                        <div className="flex justify-center gap-2 mt-auto shrink-0">
+                          <button onClick={handleRewindTap} className="w-8 h-8 border-2 border-[#111e14] flex items-center justify-center active:bg-[#111e14] active:text-[#edfeed]">
+                            <PixelIcon.Rewind />
+                          </button>
+                          <button onClick={handlePlayToggle} className="w-10 h-9 border-2 border-[#111e14] flex items-center justify-center bg-[#111e14] text-[#edfeed]">
+                            {isPlaying ? <PixelIcon.Pause /> : <PixelIcon.Play />}
+                          </button>
+                          <button onClick={handleEject} className="w-8 h-8 border-2 border-[#111e14] flex items-center justify-center active:bg-[#111e14] active:text-[#edfeed]">
+                            <PixelIcon.Close />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="qr-scan-landscape"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={onScanClick}
+                        className="border-2 border-dashed border-[#111e14] p-3 h-full flex flex-col justify-center items-center cursor-pointer gap-2"
+                      >
+                        <PixelIcon.Camera />
+                        <span className="text-[9px] font-black uppercase tracking-[0.15em] text-center">ESCANEAR CÓDIGO</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            )}
+
+            <div className={`flex flex-col min-h-0 min-w-0 ${isLandscape ? 'flex-1' : 'h-full'}`}>
             {/* ─── TOP AREA: QR SCAN or INLINE PLAYER ─── */}
+            {!isLandscape && (
             <div className="shrink-0 mb-2 mt-1">
               <AnimatePresence mode="wait">
                 {hasActiveIntel && currentIntel ? (
@@ -641,7 +743,7 @@ export default function NokiaPlayer({
                             intel={currentIntel}
                             isPlaying={isPlaying}
                             volume={volume}
-                            onEnded={() => setIsPlaying(false)}
+                            onEnded={onVideoEnded}
                           />
                         </div>
                         <div className="flex justify-center mb-2">
@@ -713,7 +815,7 @@ export default function NokiaPlayer({
                     {/* Controls */}
                     <div className="flex justify-center items-center gap-3">
                       <button
-                        onClick={handleRewindLocal}
+                        onClick={handleRewindTap}
                         className={`w-10 h-9 border-2 border-[#111e14] flex items-center justify-center active:bg-[#111e14] active:text-[#edfeed] shadow-[1px_1px_0px_#111e14] ${status === 'REWINDING' ? 'bg-[#111e14] text-[#edfeed]' : ''}`}
                       >
                         <PixelIcon.Rewind />
@@ -753,6 +855,28 @@ export default function NokiaPlayer({
                 )}
               </AnimatePresence>
             </div>
+            )}
+
+            {!isLandscape && showSystemsMenu && (
+              <div className="flex gap-1 mb-1 shrink-0">
+                {hasTerminalAccess && onTerminalOpen && (
+                  <button
+                    onClick={onTerminalOpen}
+                    className="flex-1 py-1 border-2 border-[#111e14] text-[8px] font-black uppercase active:bg-[#111e14] active:text-[#edfeed]"
+                  >
+                    MH-DOS v6.22
+                  </button>
+                )}
+                {hasMacAccess && onMacOpen && (
+                  <button
+                    onClick={onMacOpen}
+                    className="flex-1 py-1 border-2 border-[#111e14] text-[8px] font-black uppercase active:bg-[#111e14] active:text-[#edfeed]"
+                  >
+                    MACOS v7.1
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* ─── FILTER TABS ─── */}
             <div className="flex border-2 border-[#111e14] shrink-0 mb-2 overflow-hidden shadow-[1px_1px_0px_#111e14] bg-[#edfeed]">
@@ -773,9 +897,15 @@ export default function NokiaPlayer({
             </div>
 
             {/* ─── UNIFIED INTEL LIST ─── */}
-            <div ref={intelListRef} className="flex-grow overflow-y-auto min-h-0 px-0.5 custom-nokia-scrollbar" style={{ scrollbarWidth: 'none' }}>
+            <div
+              ref={intelListRef}
+              className={`flex-grow min-h-0 px-0.5 custom-nokia-scrollbar ${
+                activeTab === 'SMS' ? 'overflow-hidden flex flex-col' : 'nokia-scroll-area'
+              }`}
+              style={{ scrollbarWidth: 'none' }}
+            >
               {activeTab === 'SMS' ? (
-                <div className="flex flex-col flex-grow min-h-0 h-full">
+                <div className="flex flex-col flex-grow min-h-0">
                   {!activeCharacter?.phoneNumber ? (
                     <div className="flex flex-col items-center justify-center p-4 border-2 border-[#111e14] bg-[#edfeed] gap-3 text-center my-2 shadow-[1px_1px_0px_#111e14]">
                       <div className="scale-125"><PixelIcon.SMS /></div>
@@ -805,7 +935,7 @@ export default function NokiaPlayer({
                       <p className="text-[8px]">VOCÊ NÃO PERTENCE A NENHUM GRUPO DE AGENTES.</p>
                     </div>
                   ) : (
-                    <div className="flex flex-col flex-grow min-h-0 h-full">
+                    <div className="flex flex-col flex-grow min-h-0">
                       <div className="flex justify-between items-center bg-[#111e14]/5 border-b border-[#111e14]/20 p-1.5 text-[9px] font-black shrink-0 mb-1.5">
                         <div className="flex items-center gap-1">
                           <span className="opacity-60">DE:</span>
@@ -820,7 +950,7 @@ export default function NokiaPlayer({
 
                       {!activeConversationId ? (
                         /* CONVERSATIONS LIST */
-                        <div className="flex-grow overflow-y-auto min-h-0 px-0.5 space-y-1.5 custom-nokia-scrollbar">
+                        <div className="flex-grow nokia-scroll-area px-0.5 space-y-1.5 custom-nokia-scrollbar">
                           {conversations.map((conv) => {
                             const dateStr = conv.lastMessage.createdAt?.toDate 
                               ? conv.lastMessage.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -831,6 +961,7 @@ export default function NokiaPlayer({
                                 onClick={() => {
                                   getSfx().playConfirm();
                                   markConversationRead(conv.contactId);
+                                  shouldStickToBottomRef.current = true;
                                   setActiveConversationId(conv.contactId);
                                 }}
                                 className="w-full text-left flex flex-col p-2 border-2 border-[#111e14] bg-[#edfeed] hover:bg-[#111e14]/5 active:scale-[0.98] transition-all shadow-[1px_1px_0px_#111e14]"
@@ -858,7 +989,7 @@ export default function NokiaPlayer({
                         </div>
                       ) : (
                         /* ACTIVE CONVERSATION MESSAGES */
-                        <div className="flex flex-col flex-grow min-h-0 h-full">
+                        <div className="flex flex-col flex-grow min-h-0">
                           {/* Chat Header */}
                           <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#111e14] border-dotted shrink-0">
                             <button
@@ -876,7 +1007,11 @@ export default function NokiaPlayer({
                           </div>
 
                           {/* Messages list */}
-                          <div ref={messagesContainerRef} className="flex-grow overflow-y-auto min-h-0 px-0.5 space-y-2 custom-nokia-scrollbar">
+                          <div
+                            ref={messagesContainerRef}
+                            onScroll={handleMessagesScroll}
+                            className="flex-grow nokia-scroll-area px-0.5 space-y-2 custom-nokia-scrollbar"
+                          >
                             {(() => {
                               const activeConv = conversations.find(c => c.contactId === activeConversationId);
                               if (!activeConv) return null;
@@ -1005,6 +1140,7 @@ export default function NokiaPlayer({
                   })}
                 </div>
               )}
+            </div>
             </div>
           </div>
         )}

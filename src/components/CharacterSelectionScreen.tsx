@@ -90,7 +90,7 @@ export default function CharacterSelectionScreen({ account, onSelect, onLogout }
   }
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-4 relative overflow-hidden bg-surface">
+    <div className="w-full h-full flex flex-col items-center justify-center p-4 relative overflow-y-auto bg-surface safe-area-pad min-h-0">
       <div className="noise-overlay" />
       <div className="scanlines" />
 

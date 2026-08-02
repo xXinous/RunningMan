@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useModal } from './ConfirmModal';
 import { adminAnalyticsService, PlayEvent, AudioMetadata, UserAchievement, UserData } from '../../services/AdminAnalyticsService';
 import { PlayerStats } from '../../types/player';
-import { intelRegistry } from '../../data/intel_registry';
+import { intelTitleLabel } from '../lib/entityLabels';
 import { activityLogger } from '../../services/ActivityLogger';
 
 type IntelSubTabId = 'acervo' | 'jukebox' | 'qr' | 'conquistas';
@@ -202,9 +202,7 @@ export default function AnalyticsPanel({ onNavigate }: AnalyticsPanelProps = {})
             {displayAnalytics.mostPlayed.length === 0 ? (<p className="text-industrial-silver/20 text-[10px] font-display font-bold uppercase tracking-widest py-8 text-center border border-dashed border-white/5 rounded-sm">Sem dados registrados</p>) : (
               displayAnalytics.mostPlayed.map(([tapeId, count]: [string, any], idx: number) => {
                 const maxCount = displayAnalytics.mostPlayed[0][1] as number;
-                const intel = intelRegistry.get(tapeId);
-                const remoteTape = audios.find((a) => a.id === tapeId);
-                const tapeName = intel?.title || remoteTape?.title || remoteTape?.originalName || tapeId;
+                const tapeName = intelTitleLabel(tapeId, audios);
                 return (
                   <div key={tapeId} className="flex items-center gap-4 group">
                     <span className={`font-display font-bold text-xs w-6 text-right ${idx < 3 ? 'text-primary' : 'text-industrial-silver/20'}`}>0{idx + 1}</span>

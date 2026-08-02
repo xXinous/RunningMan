@@ -19,11 +19,11 @@ import { isAdminAccount, redirectToAdminPanel } from '../../lib/adminAccess';
 
 export interface UsePlayerAuthOptions {
   addToast: (toast: Omit<Toast, 'id'>) => void;
-  onLogoutPlaybackReset: () => void;
+  onPlaybackReset: () => void;
 }
 
 export function usePlayerAuth(options: UsePlayerAuthOptions) {
-  const { onLogoutPlaybackReset } = options;
+  const { onPlaybackReset } = options;
 
   const [masterAccount, setMasterAccount] = useState<MasterAccount | null | undefined>(null);
   const [playerData, setPlayerData] = useState<PlayerData | null>(null);
@@ -91,11 +91,12 @@ export function usePlayerAuth(options: UsePlayerAuthOptions) {
     }
     analyticsTracker.stopAll(false);
     playerSyncService.stopAll();
+    onPlaybackReset();
     setPlayerData(null);
     setLocalStats(null);
     setIntelCollection(null);
     setScreen('characterSelection');
-  }, []);
+  }, [onPlaybackReset]);
 
   const handleLogout = useCallback(async () => {
     if (playerDataRef.current) {
@@ -106,11 +107,11 @@ export function usePlayerAuth(options: UsePlayerAuthOptions) {
 
     setPlayerData(null);
     setMasterAccount(undefined);
-    onLogoutPlaybackReset();
+    onPlaybackReset();
     setScreen('login');
 
     await logout();
-  }, [onLogoutPlaybackReset]);
+  }, [onPlaybackReset]);
 
   return {
     masterAccount,

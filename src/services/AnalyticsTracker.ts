@@ -13,6 +13,7 @@ export class AnalyticsTracker {
   private listenTimer: number | null = null;
   private syncTimer: number | null = null;
   private activePlayEventId: string | null = null;
+  private activeTapeId: string | null = null;
   private currentVolume: number = 80;
   
   private localStats: PlayerStats | null = null;
@@ -76,18 +77,29 @@ export class AnalyticsTracker {
 
   public startPlayback(intel: IntelItem) {
     if (!this.playerData) return;
-    recordPlayEvent(this.playerData.uid, this.playerData.activeCharacterId, intel.id)
-      .then(id => this.activePlayEventId = id)
-      .catch(console.error);
-    
-    activityLogger.logAction('tape_play', `Iniciou reprodução: ${intel.title}`, { intelId: intel.id });
-    
-    // Firebase Analytics: tape engagement tracking
-    firebaseAnalytics.logTapePlay(
-      intel.id, 
-      intel.type || 'AUDIO', 
-      this.playerData.character?.campaignId
-    );
+
+    // Retomar a mesma fita após pausa não é um novo play: reaproveita o
+    // playEvent aberto e só religa o timer de escuta.
+    const isResume = this.activePlayEventId !== null && this.activeTapeId === intel.id;
+    if (!isResume) {
+      this.activeTapeId = intel.id;
+      this.activePlayEventId = null;
+      recordPlayEvent(this.playerData.uid, this.playerData.activeCharacterId, intel.id)
+        .then(id => {
+          // Descarta o ID se outra fita começou enquanto o registro era criado
+          if (this.activeTapeId === intel.id) this.activePlayEventId = id;
+        })
+        .catch(console.error);
+
+      activityLogger.logAction('tape_play', `Iniciou reprodução: ${intel.title}`, { intelId: intel.id });
+
+      // Firebase Analytics: tape engagement tracking
+      firebaseAnalytics.logTapePlay(
+        intel.id, 
+        intel.type || 'AUDIO', 
+        this.playerData.character?.campaignId
+      );
+    }
     
     if (this.listenTimer) clearInterval(this.listenTimer);
     this.listenTimer = window.setInterval(() => this.tick(), 5000);
@@ -97,18 +109,27 @@ export class AnalyticsTracker {
     if (this.listenTimer) clearInterval(this.listenTimer);
   }
 
+  /** Encerra a reprodução ativa sem completar o playEvent (eject/troca de fita). */
+  public abandonPlayback() {
+    this.pausePlayback();
+    this.activePlayEventId = null;
+    this.activeTapeId = null;
+  }
+
   public endPlayback() {
     this.pausePlayback();
-    if (this.activePlayEventId) {
-      markPlayEventCompleted(this.activePlayEventId).catch(console.error);
+    const completedEventId = this.activePlayEventId;
+    if (completedEventId) {
+      markPlayEventCompleted(completedEventId).catch(console.error);
       this.activePlayEventId = null;
     }
+    this.activeTapeId = null;
     activityLogger.logAction('tape_end', 'Reprodução finalizada');
     
     // Firebase Analytics: completion tracking
     if (this.localStats) {
       firebaseAnalytics.logTapeCompleted(
-        this.activePlayEventId || 'unknown',
+        completedEventId || 'unknown',
         this.localStats.totalListenTime
       );
     }
@@ -154,6 +175,8 @@ export class AnalyticsTracker {
     this.pausePlayback();
     if (this.syncTimer) clearInterval(this.syncTimer);
     if (!skipSync) this.forceSyncToServer();
+    this.activePlayEventId = null;
+    this.activeTapeId = null;
     this.playerData = null;
     this.localStats = null;
     this.onStatsSync = null;

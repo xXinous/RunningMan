@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, LogOut, Trophy, Music, Pencil, Check, X, ExternalLink, Image, Map as MapIcon, User, Phone } from 'lucide-react';
 import { ALL_ACHIEVEMENTS } from '../data/achievements';
 import PlayerGallery from './PlayerGallery';
+import { useLandscapeLayout } from '../player/hooks/useLandscapeLayout';
 import type { GalleryImage, PlayerData } from '../types/player';
 
 interface ProfileScreenProps {
@@ -55,6 +56,7 @@ export default function ProfileScreen({
   onChangeCharacter,
   variant = 'default'
 }: ProfileScreenProps) {
+  const { isLandscape } = useLandscapeLayout();
   const earnedIds = new Set(profile.achievementIds);
   const [isEditingSpotify, setIsEditingSpotify] = useState(false);
   const [spotifyInput, setSpotifyInput] = useState(profile.character.spotifyPlaylistUrl || '');
@@ -271,7 +273,9 @@ export default function ProfileScreen({
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: '100%', opacity: 0 }}
       transition={{ type: 'spring', damping: 24, stiffness: 200 }}
-      className="relative w-full max-w-sm h-full max-h-[750px] bg-[#1e1e1e] rounded-[32px] border-8 border-[#1a1a1a] flex flex-col overflow-hidden z-50"
+      className={`relative w-full h-full bg-[#1e1e1e] rounded-[32px] border-8 border-[#1a1a1a] flex flex-col overflow-hidden z-50 ${
+        isLandscape ? 'max-w-none max-h-none' : 'max-w-sm max-h-[750px]'
+      }`}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-5 pb-3 border-b border-[#333] shrink-0">

@@ -17,6 +17,7 @@ import {
 import { clearPendingVideoPlay } from '../../store/firestore';
 import type { PlayerData, PlayerStats, WalkmanStatus, DisplayMode, AppScreen } from '../../types/player';
 import type { Toast } from '../../components/ToastNotification';
+import type { DeviceCapabilities } from './useActiveCampaign';
 
 export interface UseWalkmanPlaybackOptions {
   playerData: PlayerData | null;
@@ -25,10 +26,11 @@ export interface UseWalkmanPlaybackOptions {
   setPlayerData: Dispatch<SetStateAction<PlayerData | null>>;
   setScreen: Dispatch<SetStateAction<AppScreen>>;
   addToast: (toast: Omit<Toast, 'id'>) => void;
+  deviceCapabilities: DeviceCapabilities;
 }
 
 export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
-  const { playerData, localStats, playerDataRef, setPlayerData, setScreen, addToast } = options;
+  const { playerData, localStats, playerDataRef, setPlayerData, setScreen, addToast, deviceCapabilities } = options;
 
   const [walkmanStatus, setWalkmanStatus] = useState<WalkmanStatus>('IDLE');
   const [currentIntel, setCurrentIntel] = useState<IntelBase | null>(null);
@@ -45,13 +47,28 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
   const nokiaBackHandlerRef = useRef<(() => boolean) | null>(null);
   const lastVideoRequestRef = useRef<string | null>(null);
 
+  // Ref para os callbacks estáveis consultarem as capacidades atuais do dispositivo
+  const capabilitiesRef = useRef(deviceCapabilities);
+  capabilitiesRef.current = deviceCapabilities;
+
   const isPlaying = walkmanStatus === 'PLAYING';
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+  const clearPendingTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
   }, []);
+
+  const scheduleTimer = useCallback(
+    (fn: () => void, delay: number) => {
+      clearPendingTimer();
+      timerRef.current = setTimeout(fn, delay);
+    },
+    [clearPendingTimer]
+  );
+
+  useEffect(() => clearPendingTimer, [clearPendingTimer]);
 
   useEffect(() => {
     audioEngine.setVolume(volume);
@@ -68,20 +85,47 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
   useEffect(() => {
     if (currentIntel instanceof AudioIntel && currentIntel.mediaUrl) {
       audioEngine.loadTrack(currentIntel.mediaUrl);
-      analyticsTracker.pausePlayback();
+      // Fita nova inserida: descarta o playEvent da anterior (não foi concluído)
+      analyticsTracker.abandonPlayback();
     } else if (!currentIntel || currentIntel instanceof VideoIntel) {
       audioEngine.clearTrack();
-      if (!currentIntel) analyticsTracker.stopAll();
+      // Eject/troca apenas abandona a reprodução; o tracker da sessão
+      // (stats, conquistas) continua vivo — stopAll fica para logout/troca de agente.
+      analyticsTracker.abandonPlayback();
     }
     return () => audioEngine.clearTrack();
   }, [currentIntel?.id]);
 
   useEffect(() => {
-    if (currentIntel instanceof VideoIntel) return;
+    // Vídeo é reproduzido pelo surface do shell (ex: Nokia), mas a telemetria
+    // segue o mesmo caminho do áudio para manter o motor universal.
+    if (currentIntel instanceof VideoIntel) {
+      if (walkmanStatus === 'PLAYING') {
+        hasPlayedCurrentTape.current = true;
+        analyticsTracker.startPlayback(currentIntel as Parameters<typeof analyticsTracker.startPlayback>[0]);
+      } else {
+        analyticsTracker.pausePlayback();
+      }
+      return;
+    }
     if (walkmanStatus === 'PLAYING') {
       hasPlayedCurrentTape.current = true;
-      audioEngine.play();
-      if (currentIntel) analyticsTracker.startPlayback(currentIntel as Parameters<typeof analyticsTracker.startPlayback>[0]);
+      let cancelled = false;
+      audioEngine
+        .play()
+        .then(() => {
+          if (cancelled || !currentIntel) return;
+          analyticsTracker.startPlayback(currentIntel as Parameters<typeof analyticsTracker.startPlayback>[0]);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // Autoplay bloqueado ou mídia indisponível: não deixa a UI presa em PLAYING
+          setWalkmanStatus('LOADED');
+          addToast({ type: 'error', title: 'Falha na Reprodução', subtitle: 'Toque em play novamente', icon: '[!]' });
+        });
+      return () => {
+        cancelled = true;
+      };
     } else if (walkmanStatus === 'REWINDING') {
       audioEngine.stop();
       analyticsTracker.pausePlayback();
@@ -89,18 +133,21 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
       audioEngine.pause();
       analyticsTracker.pausePlayback();
     }
-  }, [walkmanStatus, currentIntel?.id]);
+  }, [walkmanStatus, currentIntel?.id, addToast]);
 
   const resetPlayback = useCallback(() => {
+    clearPendingTimer();
     setCurrentIntel(null);
     setWalkmanStatus('IDLE');
     setActiveEvidence(null);
     setVolume(80);
+    setDisplayMode('default');
     setIsMuted(false);
     setPreMuteVolume(80);
     setScanTimes([]);
     hasPlayedCurrentTape.current = false;
-  }, []);
+    lastVideoRequestRef.current = null;
+  }, [clearPendingTimer]);
 
   const handleQrDetected = useCallback(
     async (code: string) => {
@@ -125,12 +172,26 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         const now = Date.now();
         const recentScans = [...scanTimes.filter((t) => now - t < 300000), now];
         setScanTimes(recentScans);
+        const updatedPD = { ...currentPD, unlockedIntelIds: updatedIds };
+        setPlayerData(updatedPD);
+        analyticsTracker.updatePlayerData(updatedPD);
         analyticsTracker.checkAchievements(recentScans);
-        setPlayerData({ ...currentPD, unlockedIntelIds: updatedIds });
+
+        if (intel instanceof VideoIntel && !capabilitiesRef.current.supportsVideo) {
+          // Intel desbloqueada, mas este dispositivo não reproduz vídeo
+          addToast({
+            type: 'error',
+            title: alreadyOwned ? 'Mídia Incompatível' : 'Intel Desbloqueada!',
+            subtitle: 'Este dispositivo não reproduz vídeo',
+            icon: '[X]',
+          });
+          activityLogger.logAction('video_select', `Vídeo bloqueado (dispositivo incompatível): ${intel.title}`, { tapeId: intel.id });
+          return;
+        }
 
         hasPlayedCurrentTape.current = false;
         setWalkmanStatus('LOADING');
-        timerRef.current = setTimeout(() => {
+        scheduleTimer(() => {
           setCurrentIntel(intel);
           setWalkmanStatus('LOADED');
           addToast({
@@ -149,7 +210,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         addToast({ type: 'error', title: 'Erro QR', subtitle: 'Tente dnv', icon: '[!]' });
       }
     },
-    [localStats, scanTimes, addToast, playerDataRef, setPlayerData]
+    [localStats, scanTimes, addToast, playerDataRef, setPlayerData, scheduleTimer]
   );
 
   const handleIntelSelect = useCallback(
@@ -165,12 +226,22 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         firebaseAnalytics.logEvidenceViewed(intel.id, intel.type);
       } else if (intel instanceof AudioIntel || intel instanceof VideoIntel) {
         if (intel.id === currentIntel?.id) return;
+        if (intel instanceof VideoIntel && !capabilitiesRef.current.supportsVideo) {
+          addToast({
+            type: 'error',
+            title: 'Mídia Incompatível',
+            subtitle: 'Este dispositivo não reproduz vídeo',
+            icon: '[X]',
+          });
+          activityLogger.logAction('video_select', `Vídeo bloqueado (dispositivo incompatível): ${intel.title}`, { intelId: intel.id });
+          return;
+        }
         if (!hasPlayedCurrentTape.current && currentIntel) {
           analyticsTracker.incrementStat('ejectWithoutPlay');
         }
         hasPlayedCurrentTape.current = false;
         setWalkmanStatus('LOADING');
-        timerRef.current = setTimeout(() => {
+        scheduleTimer(() => {
           setCurrentIntel(intel);
           setWalkmanStatus('LOADED');
         }, 400);
@@ -181,7 +252,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         );
       }
     },
-    [currentIntel, playerDataRef]
+    [currentIntel, playerDataRef, addToast, scheduleTimer]
   );
 
   const handleEject = useCallback(() => {
@@ -196,11 +267,17 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
   const handleCancelScan = useCallback(() => setWalkmanStatus('IDLE'), []);
   const handleSetIsPlaying = useCallback((p: boolean) => setWalkmanStatus(p ? 'PLAYING' : 'LOADED'), []);
 
+  // Fim de mídia reproduzida pelo shell (ex: vídeo no Nokia) segue o mesmo
+  // caminho do fim de áudio: motor decide o estado e fecha a telemetria.
+  const handleVideoEnded = useCallback(() => {
+    setWalkmanStatus('LOADED');
+    analyticsTracker.endPlayback();
+  }, []);
+
   const handleRewind = useCallback(() => {
     setWalkmanStatus('REWINDING');
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setWalkmanStatus('LOADED'), 1500);
-  }, []);
+    scheduleTimer(() => setWalkmanStatus('LOADED'), 1500);
+  }, [scheduleTimer]);
 
   const handleModeChange = useCallback((dir: 'up' | 'down') => {
     setDisplayMode((prev) => {
@@ -262,13 +339,27 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         if (!updatedIds.includes(intelId)) {
           const unlockResult = await intelService.unlock(currentPD, intelId);
           updatedIds = unlockResult.updatedIds;
-          setPlayerData({ ...currentPD, unlockedIntelIds: updatedIds });
+          const updatedPD = { ...currentPD, unlockedIntelIds: updatedIds };
+          setPlayerData(updatedPD);
+          analyticsTracker.updatePlayerData(updatedPD);
+        }
+
+        if (!capabilitiesRef.current.supportsVideo) {
+          // Desbloqueia a intel, mas avisa que este dispositivo não reproduz vídeo
+          await clearPendingVideoPlay(currentPD.uid, currentPD.activeCharacterId);
+          addToast({
+            type: 'error',
+            title: 'Transmissão Recebida',
+            subtitle: 'Este dispositivo não reproduz vídeo',
+            icon: '[X]',
+          });
+          return;
         }
 
         setScreen('player');
         hasPlayedCurrentTape.current = false;
         setWalkmanStatus('LOADING');
-        timerRef.current = setTimeout(() => {
+        scheduleTimer(() => {
           setCurrentIntel(intel);
           setWalkmanStatus('PLAYING');
           addToast({
@@ -292,7 +383,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
         console.error('[WalkmanPlayback] Remote video play failed:', err);
       }
     },
-    [playerDataRef, setPlayerData, setScreen, addToast]
+    [playerDataRef, setPlayerData, setScreen, addToast, scheduleTimer]
   );
 
   return {
@@ -317,6 +408,7 @@ export function useWalkmanPlayback(options: UseWalkmanPlaybackOptions) {
     handleCancelScan,
     handleSetIsPlaying,
     handleRewind,
+    handleVideoEnded,
     handleModeChange,
     handleProfileOpen,
     handleTerminalOpen,

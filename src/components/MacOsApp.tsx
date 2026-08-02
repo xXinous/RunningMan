@@ -4,6 +4,7 @@ import AppleIcon from './icons/AppleIcon';
 import { checkMacClosed, firestoreUnlockIntel, firestoreGrantAchievements } from '../store/firestore';
 import { analyticsTracker } from '../services/AnalyticsTracker';
 import { activityLogger } from '../services/ActivityLogger';
+import { useLandscapeLayout } from '../player/hooks/useLandscapeLayout';
 const TEXTO_CORROMPIDO = `S̸e̵ ̸o̸n̵d̴a̷ ̶s̵o̵n̵o̶r̶a̷ ̷a̶t̶i̵n̵g̷e̸ ̴∇̸ ̴∞̵ ̵n̷o̵ ̵m̶i̶l̶i̴s̸s̶e̵g̷u̴n̸d̸o̵ ̴d̵o̴ ̷e̶r̵r̵o̸ ̶t̴e̵m̵p̵o̶r̵a̵l̴.̶.̶.̷
 O̵ ̵█̶█̶█̶█̶█̶█̶█̶█̶█̶█̶ ̷n̵ã̷o̵ ̷é̴ ̵l̵i̶n̴h̷a̴.̵ ̶É̸ ̴u̶m̸ ̷l̶o̵o̵p̸ ̷d̵e̴ ̶c̵ó̸d̵i̴g̵o̵.̶
 1̷9̶0̶0̶ ̶▒̶░̶▓̶ ̶E̷R̵R̴O̷ ̸S̷I̸N̸T̸A̶X̵E̴ ̴▓̸░̸▒̸ ̶2̶0̶0̶0̵
@@ -85,6 +86,7 @@ import { diskRepairService } from '../services/DiskRepairService';
 import { intelRegistry } from '../data/intel_registry';
 
 export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
+  const { isLandscape, viewportHeight } = useLandscapeLayout();
   const [phase, setPhase] = useState<'login' | 'desktop'>('login');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activeWindow, setActiveWindow] = useState<ActiveWindow>(null);
@@ -103,14 +105,14 @@ export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
   }, []);
 
   const handleClose = useCallback(async () => {
-    activityLogger.logAction(uid, 'Sistema', 'macos', 'Solicitou desligamento do MacOS');
+    activityLogger.logAction('macos', 'Solicitou desligamento do MacOS');
     await checkMacClosed(uid);
     onClose();
   }, [uid, onClose]);
 
   const handleLogin = useCallback(() => {
     if (navigator.vibrate) navigator.vibrate(20);
-    activityLogger.logAction(uid, 'Sistema', 'macos', 'Entrou no Desktop MacOS');
+    activityLogger.logAction('macos', 'Entrou no Desktop MacOS');
     setPhase('desktop');
   }, [uid]);
 
@@ -130,18 +132,19 @@ export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
   }, [uid]);
 
   const openDiskRepair = useCallback(() => {
-    activityLogger.logAction(uid, 'Sistema', 'macos', 'Abriu aplicativo: DiskRepair Pro');
+    activityLogger.logAction('macos', 'Abriu aplicativo: DiskRepair Pro');
     setActiveWindow('diskRepair');
     setRepairStep('idle');
     analyticsTracker.grantAchievement('ACH-REPAIR-APP');
   }, [uid]);
   const closeWindow = useCallback(() => setActiveWindow(null), []);
+  const windowMaxHeight = Math.min(480, Math.max(200, viewportHeight - 56));
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex flex-col overflow-hidden select-none touch-none text-black"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden select-none touch-none text-black player-viewport"
       style={{
         backgroundColor: phase === 'desktop' ? '#008080' : '#808080',
         fontFamily: '"Chicago", "Geneva", sans-serif',
@@ -241,15 +244,25 @@ export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
               className="absolute inset-0"
             >
         
-              <div className="absolute right-0 top-0 bottom-0 w-24 p-4 flex flex-col items-center gap-8 z-10">
+              <div
+                className={`absolute z-10 p-4 ${
+                  isLandscape
+                    ? 'left-0 top-0 right-0 flex flex-row flex-wrap gap-6 items-start'
+                    : 'right-0 top-0 bottom-0 w-24 flex flex-col items-center gap-8'
+                }`}
+              >
                 <DesktopIcon emoji="💿" label="Macintosh HD" onClick={() => setActiveWindow('controlPanel')} />
                 <DesktopIcon emoji="💾" label="DiskRepair Pro" highlighted onClick={openDiskRepair} />
-                <div className="mt-auto">
+                <div className={isLandscape ? '' : 'mt-auto'}>
                   <DesktopIcon emoji="🗑️" label="Lixo" />
                 </div>
               </div>
-        
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-4 py-2 z-30">
+
+              <div
+                className={`absolute inset-0 flex pointer-events-none px-4 py-2 z-30 ${
+                  isLandscape ? 'items-start justify-start pt-14' : 'items-center justify-center'
+                }`}
+              >
                 <AnimatePresence>
             
                   {activeWindow === 'controlPanel' && (
@@ -257,8 +270,8 @@ export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
                       initial={{ scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       exit={{ scale: 0.9, opacity: 0 }}
-                      className="pointer-events-auto w-full max-w-sm bg-[#ddd] border border-black flex flex-col"
-                      style={{ boxShadow: '2px 2px 0 rgba(0,0,0,0.5)' }}
+                      className="pointer-events-auto w-full max-w-sm bg-[#ddd] border border-black flex flex-col min-h-0 overflow-hidden"
+                      style={{ boxShadow: '2px 2px 0 rgba(0,0,0,0.5)', maxHeight: windowMaxHeight }}
                     >
                       <WindowTitleBar title="Painel de Controle" onClose={closeWindow} />
                       <div className="p-4 bg-white m-1 border border-black text-[11px] font-medium leading-relaxed">
@@ -277,8 +290,8 @@ export default function MacOsApp({ uid, onClose }: MacOsAppProps) {
                       initial={{ scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       exit={{ scale: 0.9, opacity: 0 }}
-                      className="pointer-events-auto w-full max-w-lg bg-[#ddd] border border-black flex flex-col max-h-full overflow-hidden"
-                      style={{ boxShadow: '2px 2px 0 rgba(0,0,0,0.5)' }}
+                      className="pointer-events-auto w-full max-w-lg bg-[#ddd] border border-black flex flex-col min-h-0 overflow-hidden"
+                      style={{ boxShadow: '2px 2px 0 rgba(0,0,0,0.5)', maxHeight: windowMaxHeight }}
                     >
                       <WindowTitleBar title="DiskRepair Pro 4.0" onClose={closeWindow} />
                       <div className="p-3 sm:p-4 flex flex-col min-h-0 flex-1 overflow-hidden">

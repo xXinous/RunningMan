@@ -256,8 +256,15 @@ export async function setMacStateForUsers(uids: string[], force: boolean, grant:
   await batch.commit();
 }
 
-export async function checkTerminalClosed(uid: string): Promise<void> {
+export async function checkTerminalClosed(uid: string, characterId?: string): Promise<void> {
   await setDoc(doc(db, 'users', uid), { forceTerminalOpen: false }, { merge: true });
+  if (characterId) {
+    await setDoc(
+      doc(db, 'users', uid, 'characters', characterId),
+      { forceTerminalOpen: false },
+      { merge: true }
+    );
+  }
 }
 
 export async function checkMacClosed(uid: string): Promise<void> {
@@ -276,14 +283,29 @@ export async function fetchLimboGlobalState(): Promise<LimboGlobalState> {
   return snap.exists() ? (snap.data() as LimboGlobalState) : { seized: false };
 }
 
-export async function firestoreMarkThreadReadGlobal(threadId: string): Promise<void> {
+export async function firestoreMarkThreadRead(
+  uid: string,
+  characterId: string,
+  threadId: string,
+): Promise<void> {
+  const charRef = doc(db, 'users', uid, 'characters', characterId);
   const limboRef = doc(db, 'system', 'limboState');
+
   await runTransaction(db, async (transaction) => {
-    const snap = await transaction.get(limboRef);
-    const data = snap.exists() ? snap.data() : { seized: false, readThreadIds: [] };
-    const readThreadIds = data.readThreadIds || [];
-    if (!readThreadIds.includes(threadId)) {
-      transaction.set(limboRef, { readThreadIds: [...readThreadIds, threadId] }, { merge: true });
+    const charSnap = await transaction.get(charRef);
+    const limboSnap = await transaction.get(limboRef);
+
+    if (charSnap.exists()) {
+      const charReadIds: string[] = charSnap.data().readThreadIds || [];
+      if (!charReadIds.includes(threadId)) {
+        transaction.set(charRef, { readThreadIds: [...charReadIds, threadId] }, { merge: true });
+      }
+    }
+
+    const limboData = limboSnap.exists() ? limboSnap.data() : { seized: false, readThreadIds: [] };
+    const globalReadIds: string[] = limboData.readThreadIds || [];
+    if (!globalReadIds.includes(threadId)) {
+      transaction.set(limboRef, { readThreadIds: [...globalReadIds, threadId] }, { merge: true });
     }
   });
 }

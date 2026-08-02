@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { firestoreMarkThreadReadGlobal, firestoreGrantAchievements } from '../store/firestore';
+import { firestoreMarkThreadRead, firestoreGrantAchievements } from '../store/firestore';
+import { useLandscapeLayout } from '../player/hooks/useLandscapeLayout';
 interface LimboBoardProps {
   uid: string;
   characterId?: string;
@@ -120,13 +121,16 @@ const THREADS: Thread[] = [
     posts: [
       { author: 'SYSOP_X', date: '20/12/1999 - 00:00:01', style: 'sysop', content: 'Bem-vindos. Este é um board de pesquisa, não um culto. O Y2K é um bug de software. Mantenham o foco nos patches.' },
       { author: 'TruthSeeker', date: '21/12/1999 - 04:30:00', content: 'Você não pode esconder a verdade, Sysop. Os militares tão rastreando nosso IP. Eles sabem que o LIMBO_01 não tá na Terra.' },
-      { author: 'Ghost_in_the_Shell', date: '22/12/1999 - 16:20:44', content: 'O tracert pro 212.45.01.01 morre num salto que resolve pra 0.0.0.0 com latência infinita. O servidor não existe.' },
+      { author: 'Ghost_in_the_Shell', date: '22/12/1999 - 16:20:44', content: 'O tracert pro 212.45.1.1 morre num salto que resolve pra 0.0.0.0 com latência infinita. O servidor não existe.' },
       { author: 'Ping_God', date: '23/12/1999 - 09:12:11', content: 'Se não tá no espaço... tá hospedado no tempo? Preciso de mais café.' },
       { author: 'SYSOP_X', date: '23/12/1999 - 12:00:00', style: 'sysop', content: 'Guarde os chapéus de alumínio. É só IP spoofing. Fim.' },
     ]
   },
 ];
+export const LIMBO_THREAD_COUNT = THREADS.length;
+
 export default function LimboBoard({ uid, characterId = '', onClose, globalSeizedStatus, readThreadIds, onBackToTerminal }: LimboBoardProps) {
+  const { isLandscape } = useLandscapeLayout();
   const [view, setView] = useState<'intro' | 'forum' | 'thread' | 'military'>(globalSeizedStatus ? 'military' : 'intro');
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [onlineUsers, setOnlineUsers] = useState(84);
@@ -169,7 +173,7 @@ export default function LimboBoard({ uid, characterId = '', onClose, globalSeize
     return () => clearInterval(inter);
   }, []);
   const openThread = (id: string) => {
-    firestoreMarkThreadReadGlobal(id).catch(console.error);
+    firestoreMarkThreadRead(uid, characterId, id).catch(console.error);
     setActiveThreadId(id);
     setView('thread');
   };
@@ -178,10 +182,47 @@ export default function LimboBoard({ uid, characterId = '', onClose, globalSeize
     setActiveThreadId(null);
   };
   const activeThread = THREADS.find(t => t.id === activeThreadId);
+
+  const threadListPanel = (
+    <div className={`${isLandscape ? 'w-[38%] shrink-0 border-r border-[#33FF33]/30 overflow-y-auto min-h-0 pr-2' : ''}`}>
+      <h2 className="text-xs sm:text-sm font-bold border-b border-[#33FF33] pb-2 mb-4">&gt;&gt; BBS BOARD: DISCUSSÕES GERAIS E ANOMALIAS GLOBAIS</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr className="bg-[#33FF33] text-black">
+              <th className="p-2 border border-dashed border-black">TÍTULO DO TÓPICO</th>
+              {!isLandscape && <th className="p-2 border border-dashed border-black hidden sm:table-cell">AUTOR</th>}
+              <th className="p-2 border border-dashed border-black text-center">RESP.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {THREADS.map((t) => (
+              <tr
+                key={t.id}
+                className={`border-b border-dashed border-[#33FF33]/30 hover:bg-[#33FF33]/10 ${activeThreadId === t.id && isLandscape ? 'bg-[#33FF33]/15' : ''}`}
+              >
+                <td className="p-2">
+                  <button
+                    onClick={() => openThread(t.id)}
+                    className={`text-left w-full hover:text-black hover:bg-[#33FF33] px-1 ${readThreadIds.includes(t.id) ? 'text-green-800 line-through' : 'text-[#33FF33] underline'}`}
+                  >
+                    {readThreadIds.includes(t.id) ? '[X]' : '[+]'} {t.title}
+                  </button>
+                </td>
+                {!isLandscape && <td className="p-2 hidden sm:table-cell">{t.author}</td>}
+                <td className="p-2 text-center">{t.replies}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-[#050505] text-[#33FF33] font-mono overflow-auto touch-manipulation p-2 sm:p-4 wrap-break-word"
+      className="fixed inset-0 z-50 bg-[#050505] text-[#33FF33] font-mono overflow-hidden touch-manipulation p-2 sm:p-4 wrap-break-word player-viewport safe-area-pad"
       style={{ fontFamily: '"Terminal", "Fixedsys", "Lucida Console", monospace', WebkitFontSmoothing: 'none' }}
     >
       <style>{`
@@ -229,13 +270,13 @@ export default function LimboBoard({ uid, characterId = '', onClose, globalSeize
           <p className="mb-6 font-bold uppercase">OPERAÇÃO FIREWALL</p>
           <p className="text-sm">Este servidor e seu conteúdo estão agora classificados sob protocolos de segurança nacional.</p>
           <p className="text-sm mt-6" style={{ animation: 'blinker 1s linear infinite' }}>
-            SEU ENDEREÇO IP (212.45.01.01) FOI REGISTRADO. DESCONECTE IMEDIATAMENTE.
+            SEU ENDEREÇO IP (212.45.1.1) FOI REGISTRADO. DESCONECTE IMEDIATAMENTE.
           </p>
         </div>
       )}
 
       {(effectiveView === 'forum' || effectiveView === 'thread') && (
-        <div className="max-w-4xl mx-auto border-2 border-[#33FF33] p-2 sm:p-6 mt-8 sm:mt-12 bg-black min-h-[85vh] flex flex-col">
+        <div className="max-w-4xl mx-auto border-2 border-[#33FF33] p-2 sm:p-6 mt-8 sm:mt-12 bg-black min-h-0 max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
     
           <div className="text-center text-[9px] sm:text-sm mb-4 sm:mb-6 uppercase overflow-x-hidden">
             <pre className="overflow-x-auto">{`  _      _____ __  __ ____   ____     ___  __  
@@ -254,44 +295,25 @@ export default function LimboBoard({ uid, characterId = '', onClose, globalSeize
               [AVISO DO SYSOP] O BUG DO MILÊNIO NÃO É UMA FALHA, É UM RECURSO 
             </div>
           </div>
-          <p className="text-xs mb-4">&gt; CONECTADO VIA IP: 212.45.01.01</p>
+          <p className="text-xs mb-4">&gt; CONECTADO VIA IP: 212.45.1.1</p>
     
-          {effectiveView === 'forum' && (
-            <div className="flex-1">
-              <h2 className="text-xs sm:text-sm font-bold border-b border-[#33FF33] pb-2 mb-4">&gt;&gt; BBS BOARD: DISCUSSÕES GERAIS E ANOMALIAS GLOBAIS</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs sm:text-sm">
-                  <thead>
-                    <tr className="bg-[#33FF33] text-black">
-                      <th className="p-2 border border-dashed border-black">TÍTULO DO TÓPICO</th>
-                      <th className="p-2 border border-dashed border-black hidden sm:table-cell">AUTOR</th>
-                      <th className="p-2 border border-dashed border-black text-center">RESP.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {THREADS.map(t => (
-                      <tr key={t.id} className="border-b border-dashed border-[#33FF33]/30 hover:bg-[#33FF33]/10">
-                        <td className="p-2">
-                          <button
-                            onClick={() => openThread(t.id)}
-                            className={`text-left w-full hover:text-black hover:bg-[#33FF33] px-1 ${readThreadIds.includes(t.id) ? 'text-green-800 line-through' : 'text-[#33FF33] underline'}`}
-                          >
-                            {readThreadIds.includes(t.id) ? '[X]' : '[+]'} {t.title}
-                          </button>
-                        </td>
-                        <td className="p-2 hidden sm:table-cell">{t.author}</td>
-                        <td className="p-2 text-center">{t.replies}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {effectiveView === 'forum' && !isLandscape && (
+            <div className="flex-1 min-h-0 overflow-y-auto">{threadListPanel}</div>
+          )}
+
+          {effectiveView === 'forum' && isLandscape && (
+            <div className="flex-1 min-h-0 landscape-split gap-3 overflow-hidden">
+              {threadListPanel}
+              <div className="flex-1 flex items-center justify-center text-xs text-[#33FF33]/60 p-4 min-h-0">
+                &gt; Selecione um tópico para ler os posts
               </div>
-              <p className="mt-6 text-xs text-green-800">&gt; Sistema monitorando leitura global de dados... [{readThreadIds.length}/{THREADS.length}]</p>
             </div>
           )}
-    
+
           {effectiveView === 'thread' && activeThread && (
-            <div className="flex-1 flex flex-col">
+            <div className={`flex-1 flex min-h-0 overflow-hidden ${isLandscape ? 'landscape-split gap-3' : 'flex-col'}`}>
+              {isLandscape && threadListPanel}
+              <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
               <div className="flex justify-between items-start mb-4 gap-4">
                 <h2 className="text-xs sm:text-sm font-bold">&gt;&gt; TÓPICO: {activeThread.title}</h2>
                 <button onClick={closeThread} className="shrink-0 text-xs border border-[#33FF33] px-2 py-1 hover:bg-[#33FF33] hover:text-black">[VOLTAR]</button>
@@ -317,6 +339,7 @@ export default function LimboBoard({ uid, characterId = '', onClose, globalSeize
                   </div>
                 ))}
                 <div className="h-4" />
+              </div>
               </div>
             </div>
           )}

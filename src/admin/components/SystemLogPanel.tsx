@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, getDocs, writeBatch, Timestamp, collectionGroup } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useModal } from './ConfirmModal';
 import { wipeAllUserData, type WipeProgress } from '../wipeUsers';
+import { userService } from '../../services/UserService';
+import { masterAccountLabelByUid, characterLabelByKey } from '../lib/entityLabels';
+import type { MasterAccount } from '../../types/player';
 
 interface LogEntry {
   id: string;
@@ -50,11 +53,15 @@ const SEVERITY: Record<string, { label: string; color: string }> = {
 const LogRow = React.memo(({
   entry,
   isExpanded,
-  onToggle
+  onToggle,
+  users,
+  characterMap,
 }: {
   entry: LogEntry;
   isExpanded: boolean;
   onToggle: (id: string) => void;
+  users: MasterAccount[];
+  characterMap: Map<string, string>;
 }) => {
   const severity = SEVERITY[entry.type] || SEVERITY.action;
   const typeColor = TYPE_COLORS[entry.type] || TYPE_COLORS.action;
@@ -93,7 +100,7 @@ const LogRow = React.memo(({
         </span>
 
         <span className="text-[11px] font-display font-bold text-white shrink-0 truncate max-w-[120px] tracking-wide">
-          {entry.username || (entry.uid?.slice ? entry.uid.slice(0, 8) : 'SISTEMA')}
+          {entry.username?.trim() || masterAccountLabelByUid(entry.uid, users, 'SISTEMA')}
         </span>
 
         <span className={`text-[11px] font-sans flex-1 truncate ${
@@ -115,11 +122,17 @@ const LogRow = React.memo(({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-[11px] font-mono mb-6">
             <div className="space-y-1">
               <p className="text-[8px] font-display font-bold text-industrial-silver/20 uppercase tracking-widest">Identificador de Sessão</p>
-              <p className="text-industrial-silver/60 break-all">{entry.uid}</p>
+              <p className="text-industrial-silver/60 break-all">
+                {masterAccountLabelByUid(entry.uid, users, entry.uid || 'SISTEMA')}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-[8px] font-display font-bold text-industrial-silver/20 uppercase tracking-widest">Vetor do Agente</p>
-              <p className="text-primary/60">{entry.characterId || 'NÃO_IDENTIFICADO'}</p>
+              <p className="text-primary/60">
+                {entry.characterId
+                  ? characterLabelByKey(entry.uid, entry.characterId, characterMap, 'NÃO_IDENTIFICADO')
+                  : 'NÃO_IDENTIFICADO'}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-[8px] font-display font-bold text-industrial-silver/20 uppercase tracking-widest">Procedência / Fonte</p>
@@ -142,6 +155,8 @@ const LogRow = React.memo(({
 
 export default function SystemLogPanel() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [users, setUsers] = useState<MasterAccount[]>([]);
+  const [characterMap, setCharacterMap] = useState<Map<string, string>>(new Map());
   const [maxEntries, setMaxEntries] = useState(200);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
@@ -153,6 +168,25 @@ export default function SystemLogPanel() {
   const [isWiping, setIsWiping] = useState(false);
   const [wipeProgress, setWipeProgress] = useState<WipeProgress | null>(null);
   const { showConfirm, showAlert, modal } = useModal();
+
+  useEffect(() => {
+    const unsubUsers = userService.subscribeToUsers(setUsers);
+    const unsubCharacters = onSnapshot(collectionGroup(db, 'characters'), (snap) => {
+      const map = new Map<string, string>();
+      snap.docs.forEach((docSnap) => {
+        const uid = docSnap.ref.parent.parent?.id;
+        if (!uid) return;
+        const data = docSnap.data() as { codinome?: string };
+        map.set(`${uid}_${docSnap.id}`, data.codinome?.trim() || 'Agente sem codinome');
+      });
+      setCharacterMap(map);
+    }, (err) => console.warn('[SystemLogPanel] characters listener error:', err));
+
+    return () => {
+      unsubUsers();
+      unsubCharacters();
+    };
+  }, []);
 
   useEffect(() => {
     const q = query(
@@ -388,6 +422,8 @@ export default function SystemLogPanel() {
               entry={entry}
               isExpanded={expandedId === entry.id}
               onToggle={handleToggle}
+              users={users}
+              characterMap={characterMap}
             />
           ))
         )}

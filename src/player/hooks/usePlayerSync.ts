@@ -52,4 +52,9 @@ export function usePlayerServicesSync(
       playerSyncService.stopAll();
     };
   }, [playerData?.activeCharacterId, addToast, setPlayerData, setLocalStats, setScreen, setLimboStatus]);
+
+  // Mantém o tracker com o playerData mais recente (unlocks via QR, sync remoto, etc.)
+  useEffect(() => {
+    if (playerData) analyticsTracker.updatePlayerData(playerData);
+  }, [playerData]);
 }

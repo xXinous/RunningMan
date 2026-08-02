@@ -37,6 +37,7 @@ export interface UserData {
   displayName?: string;
   username?: string;
   email?: string;
+  masterName?: string;
   createdAt?: any;
   lastLogin?: any;
 }
@@ -237,7 +238,7 @@ export class AdminAnalyticsService {
       .slice(0, 10)
       .map(([uid, count]) => {
         const user = users.find((u) => u.uid === uid);
-        return { uid, name: user?.displayName || user?.username || (uid?.slice ? uid.slice(0, 8) : 'unknown'), count };
+        return { uid, name: user?.masterName || user?.email || user?.displayName || user?.username || 'Jogador desconhecido', count };
       });
 
     const dailyPlaysSorted = Array.from(dailyPlays.entries()).sort(([a], [b]) => a.localeCompare(b));

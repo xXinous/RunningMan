@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import RetroLoading from '../../components/player/RetroLoading';
 import NokiaDeviceWrapper from './NokiaDeviceWrapper';
 
@@ -14,6 +14,11 @@ export default function NokiaSessionLayout() {
   const session = usePlayerSession();
   const playback = usePlayerPlayback();
 
+  useEffect(() => {
+    document.body.classList.add('nokia-active');
+    return () => document.body.classList.remove('nokia-active');
+  }, []);
+
   const { playerData, screen, setScreen, visualGalleryImages } = session;
   if (!playerData) return null;
 
@@ -28,6 +33,8 @@ export default function NokiaSessionLayout() {
       setScreen={setScreen}
       backVisible={screen === 'player' ? playback.nokiaBackVisible : true}
       onProfileOpen={playback.handleProfileOpen}
+      onTerminalOpen={playback.handleTerminalOpen}
+      hasTerminalAccess={playerData.hasTerminalAccess}
     >
       <div
         style={{ display: screen === 'player' ? 'flex' : 'none' }}
@@ -45,6 +52,7 @@ export default function NokiaSessionLayout() {
             currentIntelId={playback.currentIntel?.id ?? null}
             onIntelSelect={playback.handleIntelSelect}
             onRewind={playback.handleRewind}
+            onVideoEnded={playback.handleVideoEnded}
             onEject={playback.handleEject}
             onScanClick={playback.handleScanClick}
             onCancelScan={playback.handleCancelScan}

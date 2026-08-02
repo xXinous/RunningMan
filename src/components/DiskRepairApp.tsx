@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { diskRepairService } from '../services/DiskRepairService';
 import { intelRegistry } from '../data/intel_registry';
+import { useLandscapeLayout } from '../player/hooks/useLandscapeLayout';
+
+import RetroLoading from './player/RetroLoading';
 
 interface DiskRepairAppProps {
   uid: string;
@@ -11,9 +14,9 @@ interface DiskRepairAppProps {
   isWindowed?: boolean;
 }
 
-import RetroLoading from './player/RetroLoading';
-
 export default function DiskRepairApp({ uid, characterId = '', onClose, onBackToTerminal, isWindowed }: DiskRepairAppProps) {
+  const { isLandscape } = useLandscapeLayout();
+  const compact = isWindowed && isLandscape;
   const [phase, setPhase] = useState<'intro' | 'loading' | 'viewer' | 'repairing' | 'result'>('intro');
   const [resultStatus, setResultStatus] = useState<'success' | 'fail' | null>(null);
   const [progress, setProgress] = useState(0);
@@ -48,8 +51,8 @@ export default function DiskRepairApp({ uid, characterId = '', onClose, onBackTo
     <div className={`flex flex-col gap-4 text-[#0a0a0a] text-sm ${isWindowed ? 'p-0' : 'p-4'}`}>
       <AnimatePresence mode="wait">
         {phase === 'intro' && (
-          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-6 py-6 border border-[#808080] shadow-[inset_1px_1px_#0a0a0a,inset_-1px_-1px_#fff] bg-white p-6">
-            <div className="text-6xl">💾</div>
+          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className={`flex flex-col items-center border border-[#808080] shadow-[inset_1px_1px_#0a0a0a,inset_-1px_-1px_#fff] bg-white ${compact ? 'gap-3 py-3 p-3' : 'gap-6 py-6 p-6'}`}>
+            <div className={compact ? 'text-4xl' : 'text-6xl'}>💾</div>
             <div className="text-center">
               <h2 className="font-bold mb-2">Nenhum disco detectado no Drive A:</h2>
               <p className="text-xs text-[#808080]">Por favor, insira o disquete magnético corrompido fisicamente no leitor para iniciar a análise.</p>
@@ -61,7 +64,7 @@ export default function DiskRepairApp({ uid, characterId = '', onClose, onBackTo
         )}
 
         {(phase === 'loading' || phase === 'repairing') && (
-          <div className="min-h-[200px]">
+          <div className={compact ? 'min-h-[120px]' : 'min-h-[200px]'}>
             <RetroLoading 
               message={phase === 'loading' ? 'Lendo setores do disco...' : 'Desmagnetizando MFT...'} 
               subMessage={`Progresso: ${Math.round(progress)}% - Analisando trilhas magnéticas`}
@@ -78,7 +81,7 @@ export default function DiskRepairApp({ uid, characterId = '', onClose, onBackTo
                 <p className="text-xs mt-1">O formato do volume é irreconhecível. Os cabeçários magnéticos estão desativados por exposição severa a ímãs.</p>
               </div>
             </div>
-            <div className="h-40 bg-black font-mono text-[10px] p-2 overflow-hidden break-all border-2 border-red-800/60 shadow-[inset_0_0_30px_rgba(255,0,0,0.1),0_0_15px_rgba(255,0,0,0.2)] relative">
+            <div className={`bg-black font-mono text-[10px] p-2 overflow-hidden break-all border-2 border-red-800/60 shadow-[inset_0_0_30px_rgba(255,0,0,0.1),0_0_15px_rgba(255,0,0,0.2)] relative ${compact ? 'h-24' : 'h-40'}`}>
               {/* Scan line */}
               <div className="absolute left-0 right-0 h-6 pointer-events-none z-10" style={{
                 background: 'linear-gradient(transparent, rgba(255,0,0,0.06), rgba(0,255,255,0.03), transparent)',
@@ -156,13 +159,13 @@ export default function DiskRepairApp({ uid, characterId = '', onClose, onBackTo
   if (isWindowed) return content;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#008080] font-sans selection:bg-[#000080] selection:text-white touch-none select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#008080] font-sans selection:bg-[#000080] selection:text-white touch-none select-none player-viewport safe-area-pad">
       <div className="fixed inset-0 pointer-events-none mix-blend-overlay opacity-30 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiMyMjIiPjwvcmVjdD48cGF0aCBkPSJNMCAwTDIgMk0yIDBMMCAyIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMSIvPjwvc3ZnPg==')]" />
-      <motion.div 
+      <motion.div
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="w-[95%] max-w-lg bg-[#c0c0c0] shadow-[inset_1px_1px_#dfdfdf,inset_2px_2px_#fff,inset_-1px_-1px_#0a0a0a,inset_-2px_-2px_#808080] border border-[#0a0a0a] flex flex-col relative z-10"
+        className="w-[95%] max-w-lg max-h-[calc(100dvh-2rem)] bg-[#c0c0c0] shadow-[inset_1px_1px_#dfdfdf,inset_2px_2px_#fff,inset_-1px_-1px_#0a0a0a,inset_-2px_-2px_#808080] border border-[#0a0a0a] flex flex-col relative z-10 overflow-hidden min-h-0"
       >
         <div className="bg-linear-to-r from-[#000080] to-[#1084d0] p-1 flex items-center justify-between shadow-[inset_1px_1px_#dfdfdf,inset_-1px_-1px_#808080]">
           <div className="flex items-center gap-2 px-1">
@@ -182,7 +185,7 @@ export default function DiskRepairApp({ uid, characterId = '', onClose, onBackTo
              )}
           </div>
         </div>
-        {content}
+        <div className="flex-1 min-h-0 overflow-y-auto">{content}</div>
       </motion.div>
     </div>
   );

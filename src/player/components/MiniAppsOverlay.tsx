@@ -37,7 +37,8 @@ export default function MiniAppsOverlay({ screen, playerData, limboStatus, setSc
         {screen === 'bios' && (
           <BiosTerminal
             uid={playerData.uid}
-            username={playerData.character.codinome}
+            characterId={playerData.activeCharacterId}
+            characterName={playerData.character.codinome}
             onIpDetected={() => setScreen('limbo')}
             onClose={() => setScreen('player')}
             onAppLaunch={(app) => app === 'diskRepair' && setScreen('diskRepair')}
@@ -51,7 +52,7 @@ export default function MiniAppsOverlay({ screen, playerData, limboStatus, setSc
             onClose={() => setScreen('player')}
             onBackToTerminal={() => setScreen('bios')}
             globalSeizedStatus={limboStatus.seized}
-            readThreadIds={limboStatus.readThreadIds || []}
+            readThreadIds={playerData.character.readThreadIds || []}
           />
         )}
         {screen === 'diskRepair' && (

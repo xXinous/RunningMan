@@ -297,7 +297,7 @@ export default function IntelDistributionDrawer({
                         {item.title}
                       </p>
                       <p className="text-[9px] font-mono text-zinc-600 font-bold uppercase tracking-widest mt-1">
-                        {item.type} · {item.id}
+                        {item.metadata?.chapter || item.metadata?.npc || item.type}
                       </p>
                     </div>
                     {alreadyHas && (

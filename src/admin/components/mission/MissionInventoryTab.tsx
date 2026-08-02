@@ -11,6 +11,8 @@ import { intelService } from '../../../services/IntelService';
 import { useModal } from '../ConfirmModal';
 import RetroSpinner from '../../../components/player/RetroSpinner';
 import IntelDistributionDrawer from '../IntelDistributionDrawer';
+import { fetchAudioTapesByIds } from '../../../store/firestore';
+import { intelTitleLabel } from '../../lib/entityLabels';
 
 interface MissionInventoryTabProps {
   campaign: Campaign;
@@ -30,7 +32,7 @@ export default function MissionInventoryTab({
   const [showGrantModal, setShowGrantModal] = useState<{ charId: string; uid: string } | null>(
     null
   );
-  const { showConfirm, modal } = useModal();
+  const [remoteIntelTitles, setRemoteIntelTitles] = useState<Record<string, string>>({});
 
   const campaignCharacters = useMemo(() => {
     return allCharacters.filter(({ character }) => {
@@ -85,6 +87,38 @@ export default function MissionInventoryTab({
   useEffect(() => {
     loadInventories();
   }, [campaign.id, campaignCharacters]);
+
+  useEffect(() => {
+    const unknownIds = new Set<string>();
+    Object.values(characterInventories).forEach((items) => {
+      items.forEach((t) => {
+        if (!intelRegistry.get(t.id)) unknownIds.add(t.id);
+      });
+    });
+
+    if (unknownIds.size === 0) {
+      setRemoteIntelTitles({});
+      return;
+    }
+
+    let cancelled = false;
+    fetchAudioTapesByIds([...unknownIds]).then((results) => {
+      if (cancelled) return;
+      const titles: Record<string, string> = {};
+      results.forEach((asset) => {
+        if (!asset?.id) return;
+        titles[asset.id] =
+          asset.metadata?.title || asset.filename || asset.originalName || 'Intel desconhecido';
+      });
+      setRemoteIntelTitles(titles);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [characterInventories]);
+
+  const { showConfirm, modal } = useModal();
 
   const handleExecuteBulk = async (selectedIds: Set<string>) => {
     if (!showGrantModal) return;
@@ -216,7 +250,7 @@ export default function MissionInventoryTab({
                         </button>
                       </div>
                       <p className="font-display font-bold text-[10px] text-white uppercase tracking-widest truncate group-hover/item:text-primary transition-colors">
-                        {intel?.title || t.id}
+                        {intelTitleLabel(t.id, Object.entries(remoteIntelTitles).map(([id, title]) => ({ id, title })))}
                       </p>
                       <p className="text-[8px] font-mono text-industrial-silver/40 uppercase mt-1 truncate">
                         {intel?.metadata?.npc || 'SISTEMA'}

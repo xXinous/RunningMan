@@ -13,6 +13,7 @@ import type {
   DisplayMode,
 } from '../types/player';
 import type { Toast } from '../components/ToastNotification';
+import type { DeviceCapabilities } from './hooks/useActiveCampaign';
 
 export interface PlayerSessionValue {
   masterAccount: MasterAccount | null | undefined;
@@ -28,6 +29,7 @@ export interface PlayerSessionValue {
   visualGalleryImages: GalleryImage[];
   isNokiaTheme: boolean;
   showNokiaShell: boolean;
+  deviceCapabilities: DeviceCapabilities;
   handleCharacterSelect: (char: CharacterData) => Promise<void>;
   handleCharacterSwitch: () => void;
   handleLogout: () => Promise<void>;
@@ -60,6 +62,7 @@ export interface PlayerPlaybackValue {
   handleCancelScan: () => void;
   handleSetIsPlaying: (playing: boolean) => void;
   handleRewind: () => void;
+  handleVideoEnded: () => void;
   handleModeChange: (dir: 'up' | 'down') => void;
   handleProfileOpen: () => void;
   handleTerminalOpen: () => void;

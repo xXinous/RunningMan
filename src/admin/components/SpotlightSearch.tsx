@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { masterAccountLabel } from '../lib/entityLabels';
 
 interface SearchableItem {
   id: string;
@@ -166,7 +167,6 @@ export default function SpotlightSearch({ open, onClose, items }: SpotlightSearc
   );
 }
 
-// Build searchable items from accounts, characters, and tabs
 export function buildSearchItems(
   accounts: { uid: string; email?: string; masterName?: string }[],
   characters: { uid: string; char: { id: string; codinome?: string } }[],
@@ -193,7 +193,7 @@ export function buildSearchItems(
   accounts.forEach((acc) => {
     items.push({
       id: `acc_${acc.uid}`,
-      label: acc.masterName || acc.email || acc.uid,
+      label: acc.masterName || acc.email || 'Conta sem nome',
       sublabel: acc.email,
       category: 'account',
       icon: 'person',
@@ -202,11 +202,13 @@ export function buildSearchItems(
   });
 
   // Characters
+  const accountByUid = new Map(accounts.map((acc) => [acc.uid, acc]));
   characters.forEach(({ uid, char }) => {
+    const account = accountByUid.get(uid);
     items.push({
       id: `char_${char.id}`,
-      label: char.codinome || char.id,
-      sublabel: `UID: ${uid.slice(0, 12)}...`,
+      label: char.codinome || 'Agente sem codinome',
+      sublabel: masterAccountLabel(account, 'Mestre desconhecido'),
       category: 'agent',
       icon: 'badge',
       action: () => { setActiveTab('players'); onSelectAgent?.(uid, char.id); },

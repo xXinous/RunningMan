@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { checkMacClosed } from '../store/firestore';
 import { activityLogger } from '../services/ActivityLogger';
+import { useLandscapeLayout } from '../player/hooks/useLandscapeLayout';
 import DiskRepairApp from './DiskRepairApp';
 
 interface Windows95AppProps {
@@ -12,6 +13,7 @@ interface Windows95AppProps {
 type WindowType = 'myComputer' | 'diskRepair' | 'recycleBin';
 
 export default function Windows95App({ uid, onClose }: Windows95AppProps) {
+  const { isLandscape, viewportHeight } = useLandscapeLayout();
   const [activeWindows, setActiveWindows] = useState<WindowType[]>([]);
   const [focusedWindow, setFocusedWindow] = useState<WindowType | null>(null);
   const [startMenuOpen, setStartMenuOpen] = useState(false);
@@ -26,7 +28,7 @@ export default function Windows95App({ uid, onClose }: Windows95AppProps) {
     if (activeWindows.includes(type)) {
       setFocusedWindow(type);
     } else {
-      activityLogger.logAction(uid, 'Sistema', 'windows95', `Abriu janela: ${getWindowLabel(type)}`, { window: type });
+      activityLogger.logAction('windows95', `Abriu janela: ${getWindowLabel(type)}`, { window: type });
       setActiveWindows(prev => [...prev, type]);
       setFocusedWindow(type);
     }
@@ -34,19 +36,19 @@ export default function Windows95App({ uid, onClose }: Windows95AppProps) {
   };
 
   const closeWindow = (type: WindowType) => {
-    activityLogger.logAction(uid, 'Sistema', 'windows95', `Fechou janela: ${getWindowLabel(type)}`, { window: type });
+    activityLogger.logAction('windows95', `Fechou janela: ${getWindowLabel(type)}`, { window: type });
     setActiveWindows(prev => prev.filter(w => w !== type));
     if (focusedWindow === type) setFocusedWindow(null);
   };
 
   const handleShutdown = async () => {
-    activityLogger.logAction(uid, 'Sistema', 'windows95', 'Solicitou desligamento do Windows 95');
+    activityLogger.logAction('windows95', 'Solicitou desligamento do Windows 95');
     await checkMacClosed(uid); 
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#008080] font-sans overflow-hidden select-none touch-none text-black">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#008080] font-sans overflow-hidden select-none touch-none text-black player-viewport">
       <style>{`
         @font-face {
           font-family: 'Win95';
@@ -89,23 +91,34 @@ export default function Windows95App({ uid, onClose }: Windows95AppProps) {
       `}</style>
 
       {/* Desktop Icons */}
-      <div className="flex-1 p-4 flex flex-col gap-4 pointer-events-none">
+      <div
+        className={`flex-1 p-4 pointer-events-none min-h-0 ${
+          isLandscape ? 'flex flex-row flex-wrap gap-4 items-start content-start' : 'flex flex-col gap-4'
+        }`}
+      >
         <DesktopIcon icon="💻" label="Meu Computador" onClick={() => toggleWindow('myComputer')} />
         <DesktopIcon icon="🗑️" label="Lixeira" onClick={() => toggleWindow('recycleBin')} />
         <DesktopIcon icon="💾" label="DiskRepair Pro" onClick={() => toggleWindow('diskRepair')} />
       </div>
 
       {/* Windows Layer */}
-      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+      <div
+        className={`absolute inset-0 pointer-events-none flex pb-10 ${
+          isLandscape ? 'items-start justify-start pt-2 pl-2' : 'items-center justify-center'
+        }`}
+      >
         <AnimatePresence>
-          {activeWindows.map(win => (
-            <Window 
+          {activeWindows.map((win, index) => (
+            <Window
               key={win}
-              type={win} 
+              type={win}
               isFocused={focusedWindow === win}
               onFocus={() => setFocusedWindow(win)}
               onClose={() => closeWindow(win)}
               uid={uid}
+              isLandscape={isLandscape}
+              viewportHeight={viewportHeight}
+              stackIndex={index}
             />
           ))}
         </AnimatePresence>
@@ -145,14 +158,16 @@ export default function Windows95App({ uid, onClose }: Windows95AppProps) {
         {startMenuOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setStartMenuOpen(false)} />
-            <motion.div 
-              initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }}
-              className="absolute bottom-10 left-0 w-60 bg-[#c0c0c0] win95-border-out z-50 p-0.5 flex"
+            <motion.div
+              initial={{ y: 10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 10, opacity: 0 }}
+              className="absolute bottom-10 left-0 w-60 max-h-[calc(100dvh-2.5rem)] bg-[#c0c0c0] win95-border-out z-50 p-0.5 flex overflow-hidden"
             >
-              <div className="start-menu-sidebar">
+              <div className="start-menu-sidebar shrink-0">
                 <span className="start-menu-text">Windows 95</span>
               </div>
-              <div className="flex-1 py-1">
+              <div className="flex-1 py-1 overflow-y-auto min-h-0">
                 <StartOption icon="💻" label="Programas" subMenu />
                 <StartOption icon="📂" label="Documentos" subMenu />
                 <StartOption icon="⚙️" label="Configurações" subMenu />
@@ -203,12 +218,32 @@ function StartOption({ icon, label, onClick, subMenu }: { icon: string, label: s
   );
 }
 
-const Window: React.FC<{ type: WindowType, isFocused: boolean, onFocus: () => void, onClose: () => void, uid: string }> = ({ type, isFocused, onFocus, onClose, uid }) => {
+const Window: React.FC<{
+  type: WindowType;
+  isFocused: boolean;
+  onFocus: () => void;
+  onClose: () => void;
+  uid: string;
+  isLandscape: boolean;
+  viewportHeight: number;
+  stackIndex: number;
+}> = ({ type, isFocused, onFocus, onClose, uid, isLandscape, viewportHeight, stackIndex }) => {
+  const maxWindowHeight = Math.min(480, Math.max(200, viewportHeight - 48));
+  const minHeight = isLandscape ? 200 : 300;
+
   return (
-    <motion.div 
-      initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-      className={`absolute w-[90%] max-w-lg min-h-[300px] bg-[#c0c0c0] win95-border-out pointer-events-auto flex flex-col`}
-      style={{ zIndex: isFocused ? 45 : 35 }}
+    <motion.div
+      initial={{ scale: 0.95, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      exit={{ scale: 0.95, opacity: 0 }}
+      className={`absolute w-[90%] max-w-lg bg-[#c0c0c0] win95-border-out pointer-events-auto flex flex-col min-h-0`}
+      style={{
+        zIndex: isFocused ? 45 : 35,
+        minHeight,
+        maxHeight: maxWindowHeight,
+        top: isLandscape ? 8 + stackIndex * 24 : undefined,
+        left: isLandscape ? 8 + stackIndex * 24 : undefined,
+      }}
       onPointerDown={onFocus}
     >
       {/* Window Title Bar */}
@@ -236,9 +271,9 @@ const Window: React.FC<{ type: WindowType, isFocused: boolean, onFocus: () => vo
       </div>
 
       {/* Window Content */}
-      <div className="flex-1 bg-white m-0.5 win95-border-in overflow-auto p-4 flex flex-col">
+      <div className="flex-1 min-h-0 bg-white m-0.5 win95-border-in overflow-auto p-4 flex flex-col">
         {type === 'myComputer' && (
-          <div className="grid grid-cols-3 gap-6">
+          <div className={`grid gap-4 ${isLandscape ? 'grid-cols-2' : 'grid-cols-3 gap-6'}`}>
             <DesktopIcon icon="💽" label="Disco Local (C:)" onClick={() => {}} labelOnLight />
             <DesktopIcon icon="💿" label="Drive CD (D:)" onClick={() => {}} labelOnLight />
             <DesktopIcon icon="💾" label="Disquete (A:)" onClick={() => {}} labelOnLight />

@@ -18,7 +18,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
 
   const auth = usePlayerAuth({
     addToast,
-    onLogoutPlaybackReset: () => playbackRef.current?.resetPlayback(),
+    onPlaybackReset: () => playbackRef.current?.resetPlayback(),
   });
 
   const {
@@ -38,6 +38,8 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
     handleLogout,
   } = auth;
 
+  const { activeCampaign, isNokiaTheme, deviceCapabilities } = useActiveCampaign(playerData);
+
   const playback = useWalkmanPlayback({
     playerData,
     localStats,
@@ -45,6 +47,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
     setPlayerData,
     setScreen,
     addToast,
+    deviceCapabilities,
   });
 
   playbackRef.current = { resetPlayback: playback.resetPlayback };
@@ -75,6 +78,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
     handleCancelScan,
     handleSetIsPlaying,
     handleRewind,
+    handleVideoEnded,
     handleModeChange,
     handleProfileOpen,
     handleTerminalOpen,
@@ -91,7 +95,6 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
     setWalkmanStatus
   );
 
-  const { activeCampaign, isNokiaTheme } = useActiveCampaign(playerData);
   const showNokiaShell = useShowNokiaShell(isNokiaTheme, screen);
 
   const { updateSpotify, updatePhone, selectCampaign } = useProfileUpdates(
@@ -119,6 +122,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
       visualGalleryImages,
       isNokiaTheme,
       showNokiaShell,
+      deviceCapabilities,
       handleCharacterSelect,
       handleCharacterSwitch,
       handleLogout,
@@ -141,6 +145,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
       visualGalleryImages,
       isNokiaTheme,
       showNokiaShell,
+      deviceCapabilities,
       handleCharacterSelect,
       handleCharacterSwitch,
       handleLogout,
@@ -179,6 +184,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
       handleCancelScan,
       handleSetIsPlaying,
       handleRewind,
+      handleVideoEnded,
       handleModeChange,
       handleProfileOpen,
       handleTerminalOpen,
@@ -211,6 +217,7 @@ function PlayerProvidersInner({ children }: { children: React.ReactNode }) {
       handleCancelScan,
       handleSetIsPlaying,
       handleRewind,
+      handleVideoEnded,
       handleModeChange,
       handleProfileOpen,
       handleTerminalOpen,

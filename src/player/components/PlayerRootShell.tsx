@@ -33,7 +33,7 @@ export default function PlayerRootShell() {
     <div
       onMouseDown={swipeHandlers.onMouseDown}
       ref={swipeHandlers.ref}
-      className="fixed inset-0 bg-surface flex items-center justify-center p-0 sm:p-4 overflow-hidden select-none touch-none"
+      className={`fixed inset-0 player-viewport bg-surface flex items-center justify-center p-0 sm:p-4 overflow-hidden select-none${showNokiaShell ? ' overscroll-none' : ''}`}
     >
       {!isNokiaTheme && (
         <>

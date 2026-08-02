@@ -14,6 +14,7 @@ import IntelDistributionDrawer from './IntelDistributionDrawer';
 import { useModal } from './ConfirmModal';
 import Screw from '../../components/player/Screw';
 import { ALL_ACHIEVEMENTS } from '../../data/achievements';
+import { achievementLabel, intelTitleLabel } from '../lib/entityLabels';
 
 interface AgentDossierViewProps {
   uid: string;
@@ -369,7 +370,7 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
                               <div className="w-8 h-8 bg-primary/10 text-primary flex items-center justify-center rounded-full border border-primary/20 shadow-lg text-lg">
                                  {achDef?.icon || <span className="material-symbols-outlined text-[18px]">workspace_premium</span>}
                               </div>
-                              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-primary transition-colors">{achDef?.title || achId}</span>
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest group-hover:text-primary transition-colors">{achievementLabel(achId)}</span>
                             </div>
                             <button onClick={() => handleRevokeAchievement(achId)} className="p-1.5 text-zinc-800 hover:text-red-500 hover:bg-red-500/10 rounded-sm transition-all opacity-0 group-hover:opacity-100">
                               <span className="material-symbols-outlined text-sm">delete</span>
@@ -408,8 +409,7 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {details?.intel.map(t => {
                   const intel = intelRegistry.get(t.id);
-                  const audio = allAudios.find(a => a.id === t.id);
-                  const label = intel?.title || audio?.title || audio?.originalName || t.id;
+                  const label = intelTitleLabel(t.id, allAudios);
                   const type = intel ? intel.type : 'AUDIO';
                   const plays = details?.playCounts.find(pc => pc.tapeId === t.id)?.count || 0;
                   return (
@@ -445,7 +445,7 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
                        <h4 className="text-[12px] font-black text-white uppercase truncate mb-1 group-hover:text-primary transition-colors">{label}</h4>
                        <p className="font-mono text-[9px] text-zinc-600 font-bold uppercase truncate mb-4">ID: {t.id}</p>
                        <div className="flex justify-between items-center text-[9px] font-black text-zinc-500 uppercase tracking-widest border-t border-white/5 pt-4">
-                          <span className="truncate max-w-[120px]">{intel?.metadata?.npc || audio?.artist || 'SISTEMA'}</span>
+                          <span className="truncate max-w-[120px]">{intel?.metadata?.npc || allAudios.find((a) => a.id === t.id)?.artist || 'SISTEMA'}</span>
                           <span className="text-primary/40">LVL_{intel?.level || 1}</span>
                        </div>
                     </div>
@@ -487,7 +487,7 @@ export default function AgentDossierView({ uid, character, masterAccount, onClos
               >
                 <option value="">-- SELECIONE A CONTA DESTINO --</option>
                 {allAccounts.map(a => (
-                  <option key={a.uid} value={a.uid}>{a.masterName || a.email} ({a.uid.slice(0,6)})</option>
+                  <option key={a.uid} value={a.uid}>{a.masterName || a.email}</option>
                 ))}
               </select>
 

@@ -2,7 +2,6 @@ import { Timestamp } from 'firebase/firestore';
 
 // --- UI & App State Types ---
 export type AppScreen = 'login' | 'characterSelection' | 'player' | 'profile' | 'bios' | 'limbo' | 'diskRepair' | 'macos' | 'windows95' | 'campaignSelection' | 'agentDossier';
-export type TapeState = 'empty' | 'loaded' | 'scanning';
 export type WalkmanStatus = 'IDLE' | 'LOADING' | 'LOADED' | 'PLAYING' | 'REWINDING' | 'SCANNING';
 export type DisplayMode = 'default' | 'title' | 'chapter' | 'type';
 
@@ -44,6 +43,9 @@ export interface CharacterData {
   agentId?: string; // Generated RM-XXXX ID
   unlockedCampaigns?: string[]; // IDs das campanhas desbloqueadas para este personagem
   phoneNumber?: string; // Random 10-digit US phone number, e.g. (555) 555-1234
+
+  /** Tópicos do fórum LIMBO_01 já lidos por este personagem */
+  readThreadIds?: string[];
 
   /** Comando remoto do mestre: reproduzir vídeo na tela do jogador */
   pendingVideoPlay?: {

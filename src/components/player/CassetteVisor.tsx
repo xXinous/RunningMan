@@ -13,7 +13,8 @@ export default React.memo(function CassetteVisor({
   onEject, 
   onScanClick, 
   onCancelScan, 
-  onQrDetected
+  onQrDetected,
+  compact,
 }: {
   currentIntel: IntelBase | null; 
   status: WalkmanStatus;
@@ -21,6 +22,7 @@ export default React.memo(function CassetteVisor({
   onScanClick: () => void;
   onCancelScan: () => void; 
   onQrDetected: (code: string) => void;
+  compact?: boolean;
 }) {
   const isPlaying = status === 'PLAYING';
   const isRewinding = status === 'REWINDING';
@@ -29,7 +31,11 @@ export default React.memo(function CassetteVisor({
   const hasTape = !!currentIntel && (status === 'LOADED' || status === 'PLAYING' || status === 'REWINDING');
 
   return (
-    <div className="mt-4 mx-auto w-[310px] h-[190px] bg-[#222] rounded-xl border-4 border-[#1a1a1a] shadow-[inset_0_4px_10px_rgba(0,0,0,0.6)] flex flex-col items-center relative overflow-hidden shrink-0">
+    <div
+      className={`mx-auto bg-[#222] rounded-xl border-4 border-[#1a1a1a] shadow-[inset_0_4px_10px_rgba(0,0,0,0.6)] flex flex-col items-center relative overflow-hidden shrink-0 ${
+        compact ? 'mt-0 w-full max-w-[280px] h-[160px]' : 'mt-4 w-[310px] h-[190px]'
+      }`}
+    >
 
       {([['top-2 left-2',''],['top-2 right-2','-rotate-45'],['bottom-2 left-2','rotate-90'],['bottom-2 right-2','']] as const).map(([pos, rot], i) => (
         <Screw key={i} className={`absolute ${pos} w-2.5 h-2.5 rounded-full bg-[#111]`} innerClassName={`w-1.5 h-px bg-[#333] ${rot}`} />

@@ -53,7 +53,7 @@ export class PlayerSyncService {
           if (data.forceTerminalOpen) {
             onScreenChange((prev) => {
               if (prev !== 'bios' && prev !== 'limbo' && prev !== 'diskRepair') {
-                activityLogger.logSystem(uid, data.codinome, characterId, 'sync', 'Terminal forçado pelo servidor', { triggeredBy: 'forceTerminalOpen' });
+                activityLogger.logSystem('sync', 'Terminal forçado pelo servidor', { triggeredBy: 'forceTerminalOpen', characterId });
                 return 'bios';
               }
               return prev;
@@ -61,7 +61,7 @@ export class PlayerSyncService {
           } else if (data.forceMacOpen) {
             onScreenChange((prev) => {
               if (prev !== 'macos') {
-                activityLogger.logSystem(uid, data.codinome, characterId, 'sync', 'MacOS forçado pelo servidor', { triggeredBy: 'forceMacOpen' });
+                activityLogger.logSystem('sync', 'MacOS forçado pelo servidor', { triggeredBy: 'forceMacOpen', characterId });
                 return 'macos';
               }
               return prev;
@@ -79,6 +79,24 @@ export class PlayerSyncService {
       (snap) => {
         if (snap.exists()) {
           const data = snap.data();
+
+          if (data.forceTerminalOpen) {
+            onScreenChange((prev) => {
+              if (prev !== 'bios' && prev !== 'limbo' && prev !== 'diskRepair') {
+                activityLogger.logSystem('sync', 'Terminal forçado pelo servidor', { triggeredBy: 'forceTerminalOpen', characterId });
+                return 'bios';
+              }
+              return prev;
+            });
+          } else if (data.forceMacOpen) {
+            onScreenChange((prev) => {
+              if (prev !== 'macos') {
+                activityLogger.logSystem('sync', 'MacOS forçado pelo servidor', { triggeredBy: 'forceMacOpen', characterId });
+                return 'macos';
+              }
+              return prev;
+            });
+          }
 
           onPlayerDataUpdate({
             hasTerminalAccess: !!data.hasTerminalAccess,

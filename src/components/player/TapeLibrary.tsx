@@ -1,5 +1,4 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { activityLogger } from '../../services/ActivityLogger';
 import type { IntelBase } from '../../services/IntelEngine';
 import type { DisplayMode } from '../../types/player';
 import React from 'react';
@@ -9,13 +8,15 @@ export default React.memo(function TapeLibrary({
   currentIntelId, 
   isPlaying, 
   displayMode, 
-  onIntelSelect 
+  onIntelSelect,
+  landscape,
 }: {
   intelItems: IntelBase[]; 
   currentIntelId: string | null; 
   isPlaying: boolean; 
   displayMode: DisplayMode;
   onIntelSelect: (intel: IntelBase) => void;
+  landscape?: boolean;
 }) {
   const sorted = React.useMemo(() => {
     if (displayMode === 'title') return [...intelItems].sort((a, b) => a.title.localeCompare(b.title));
@@ -25,7 +26,7 @@ export default React.memo(function TapeLibrary({
   }, [intelItems, displayMode]);
 
   return (
-    <div className="mt-6 flex-1 bg-[#1a1a1a] rounded-2xl border-2 border-[#333] overflow-hidden flex flex-col mr-[76px]">
+    <div className={`${landscape ? 'mt-0' : 'mt-6 mr-[76px]'} flex-1 bg-[#1a1a1a] rounded-2xl border-2 border-[#333] overflow-hidden flex flex-col min-h-0`}>
       <div className="p-3 border-b border-[#333] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-orange-600 rounded flex items-center justify-center"><span className="text-white font-black text-sm italic">R.</span></div>
@@ -56,10 +57,7 @@ export default React.memo(function TapeLibrary({
                       </div>
                     )}
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      onClick={() => {
-                        activityLogger.logAction('player', `Selecionou prova: ${item.title}`, { intelId: item.id, title: item.title });
-                        onIntelSelect(item);
-                      }}
+                      onClick={() => onIntelSelect(item)}
                       className={`p-2 border-b border-[#222] cursor-pointer transition-colors flex justify-between items-center ${item.id === currentIntelId ? 'bg-orange-900/20 border-orange-500/50' : 'hover:bg-[#222]'}`}>
                       <div className="flex flex-col min-w-0 pr-2">
                         <span className={`text-xs font-bold truncate ${item.id === currentIntelId ? 'text-orange-500' : 'text-gray-200'}`}>{item.title}</span>

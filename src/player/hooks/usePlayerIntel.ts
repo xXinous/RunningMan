@@ -25,7 +25,9 @@ export function usePlayerIntel(
 
     const fetchIntel = async () => {
       if (isInitialIntelLoad.current) {
-        setWalkmanStatus('LOADING');
+        // Feedback de loading no visor apenas se o walkman estiver ocioso;
+        // não sobrescreve SCANNING/PLAYING nem inventa fita (volta para IDLE).
+        setWalkmanStatus((prev) => (prev === 'IDLE' ? 'LOADING' : prev));
       }
       try {
         const collection = await intelService.getCollection(playerData);
@@ -34,7 +36,7 @@ export function usePlayerIntel(
         console.error('[PlayerIntel] Error during Intel Fetch:', error);
       } finally {
         if (isInitialIntelLoad.current) {
-          setWalkmanStatus('LOADED');
+          setWalkmanStatus((prev) => (prev === 'LOADING' ? 'IDLE' : prev));
           isInitialIntelLoad.current = false;
         }
       }

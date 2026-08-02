@@ -3,10 +3,11 @@ import { motion, useMotionValue, useTransform, animate } from 'motion/react';
 import { User } from 'lucide-react';
 import { analyticsTracker } from '../../services/AnalyticsTracker';
 import { activityLogger } from '../../services/ActivityLogger';
-export default React.memo(function SideControls({ volume, setVolume, onModeChange, onProfileOpen, onCharacterSwitch }: {
+export default React.memo(function SideControls({ volume, setVolume, onModeChange, onProfileOpen, onCharacterSwitch, landscape }: {
   volume: number; setVolume: (v: number) => void;
   onModeChange: (dir: 'up' | 'down') => void; onProfileOpen: () => void;
   onCharacterSwitch?: () => void;
+  landscape?: boolean;
 }) {
   const dragY = useMotionValue(0);
   const firedRef = useRef(false);
@@ -17,6 +18,12 @@ export default React.memo(function SideControls({ volume, setVolume, onModeChang
   
   const lastLoggedVolume = useRef(volume);
   const volumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (volume === lastLoggedVolume.current) return;
@@ -50,7 +57,13 @@ export default React.memo(function SideControls({ volume, setVolume, onModeChang
   };
 
   return (
-    <div className="absolute right-2 top-[240px] bottom-20 flex flex-col items-center justify-center gap-6 w-16">
+    <div
+      className={
+        landscape
+          ? 'relative shrink-0 w-16 flex flex-col items-center justify-center gap-4 py-2 touch-none'
+          : 'absolute right-2 top-[240px] bottom-20 flex flex-col items-center justify-center gap-6 w-16 touch-none'
+      }
+    >
       <button 
         onPointerDown={handleProfilePointerDown}
         onPointerUp={handleProfilePointerUp}
@@ -65,16 +78,13 @@ export default React.memo(function SideControls({ volume, setVolume, onModeChang
       >
         <User size={16} className="text-orange-500" />
       </button>
-      {}
       <div className="relative w-14 h-14 shrink-0 flex items-center justify-center z-20">
-        {}
         <motion.div style={{ color: upArrowColor }} className="absolute -top-4 pointer-events-none transition-colors">
           <div className="w-0 h-0 border-l-4 border-l-transparent border-r-4 border-r-transparent border-b-[6px] border-b-current" />
         </motion.div>
         <motion.div style={{ color: downArrowColor }} className="absolute -bottom-4 pointer-events-none transition-colors">
           <div className="w-0 h-0 border-l-4 border-l-transparent border-r-4 border-r-transparent border-t-[6px] border-t-current" />
         </motion.div>
-        {}
         <motion.div
           style={{ y: dragY, touchAction: 'none' }}
           className="relative w-14 h-14 rounded-full bg-[#333] border-4 border-[#1a1a1a] shadow-lg flex items-center justify-center group cursor-ns-resize"

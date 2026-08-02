@@ -311,3 +311,35 @@
   border-color: #111e14 !important;
 }
 
+.nokia-scroll-area {
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+body.nokia-active {
+  overscroll-behavior-y: none;
+}
+
+/* Landscape / viewport helpers */
+.player-viewport {
+  height: 100svh;
+  height: 100dvh;
+}
+
+.safe-area-pad {
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
+.landscape-split {
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  min-width: 0;
+}
+

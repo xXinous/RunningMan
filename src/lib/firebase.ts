@@ -71,6 +71,9 @@ const FIRESTORE_NOISE_PATTERNS = [
   'BloomFilter',
   'ERR_HTTP2_PING_FAILED',
   'WebChannelConnection',
+  'Script error',
+  'browser.storage',
+  "Cannot access 'db' before initialization",
 ];
 
 function isFirestoreNoise(message: string): boolean {
@@ -96,7 +99,8 @@ function logGlobalBrowserError(tag: string, fullMessage: string, stack?: string,
     if (isAdmin) {
       activityLogger.logAdmin(name, tag.toLowerCase(), finalMessage, metadata);
     } else {
-      activityLogger.logError(user.uid, name, finalMessage, stack, metadata);
+      activityLogger.setUser(user.uid, name);
+      activityLogger.logError('runtime', finalMessage, metadata);
     }
   });
 }
